@@ -105,9 +105,11 @@ javascript: (function() {
 
         document.querySelectorAll(hiddenSelector).forEach(el => {
             el.setAttribute('data-was-hidden', '1');
+            // اسم بديل مستخدم في النسخة المشفرة المحفوظة للتوافق مع نفس العناصر.
+            el.setAttribute('data-my-hidden', '1');
         });
 
-        const targets = document.querySelectorAll("[data-was-hidden='1']");
+        const targets = document.querySelectorAll("[data-was-hidden='1'], [data-my-hidden='1']");
         if (targets.length === 0) return;
 
         targets.forEach(el => {
@@ -681,7 +683,42 @@ javascript: (function() {
     }
 
     // ============================================================
-    // 10) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
+    // 10) إظهار أدوات نوافذ الأعضاء ومعلومات الغرفة
+    //     (قدرة مستخرجة من النسخة المفكوكة في lab/last)
+    // ============================================================
+    function enableMemberModalControls(root) {
+        (root || document).querySelectorAll('div.modal.in').forEach(modal => {
+            const classes = modal.className.split(/\s+/);
+            if (classes.length <= 2) return;
+
+            [
+                'span.fl.fa.btn.borderg.fa-envelope-o.unot',
+                'span.fl.fa.btn.borderg.fa-comment.upm',
+                'span.fl.fa.btn.borderg.fa-heart.ulike',
+                'span.fl.fa.btn.borderg.fa-ban.udelpic'
+            ].forEach(selector => {
+                modal.querySelectorAll(selector).forEach(control => {
+                    control.style.setProperty('visibility', 'visible', 'important');
+                    control.style.setProperty('display', 'inline-block', 'important');
+                    control.style.setProperty('opacity', '1', 'important');
+                });
+            });
+
+            modal.querySelectorAll('.u-room, .roomh').forEach(roomElement => {
+                const roomText = roomElement.textContent.trim();
+                if (roomText !== '' && !roomText.includes('undefined')) {
+                    roomElement.style.setProperty('visibility', 'visible', 'important');
+                    roomElement.style.setProperty('display', 'block', 'important');
+                    roomElement.style.setProperty('opacity', '1', 'important');
+                } else {
+                    roomElement.style.setProperty('display', 'none', 'important');
+                }
+            });
+        });
+    }
+
+    // ============================================================
+    // 11) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
     // ============================================================
     new MutationObserver(() => {
         const searchBox = document.getElementById('usearch');
@@ -693,6 +730,7 @@ javascript: (function() {
         checkHiddenUsers();
         enablePrivateChatOnS4();
         enableProfileModalOnS4();
+        enableMemberModalControls();
     }).observe(document.body, {
         childList: true,
         subtree: true
@@ -705,6 +743,7 @@ javascript: (function() {
     checkHiddenUsers();
     enablePrivateChatOnS4();
     enableProfileModalOnS4();
+    enableMemberModalControls();
 
     console.log("✅ تم التفعيل: إظهار الأزرار + المخفيين + إصلاح جميع الإطارات والألوان (بما فيها ahmed + mhmood) + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png + نافذة البروفايل الحديثة + تتبع الغرف [دمج V1+V3 بسلسلة احتياطية + إضافات جديدة]");
 
