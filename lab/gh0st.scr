@@ -205,9 +205,11 @@ javascript: (function() {
 
         document.querySelectorAll(hiddenSelector).forEach(el => {
             el.setAttribute('data-sp-jw-revealed', '1');
+            // اسم بديل مستخدم في النسخة المشفرة المحفوظة للتوافق مع نفس العناصر.
+            el.setAttribute('data-my-hidden', '1');
         });
 
-        const targets = document.querySelectorAll("[data-sp-jw-revealed='1']");
+        const targets = document.querySelectorAll("[data-sp-jw-revealed='1'], [data-my-hidden='1']");
         if (targets.length === 0) return;
 
         targets.forEach(el => {
@@ -786,7 +788,42 @@ javascript: (function() {
     }
 
     // ============================================================
-    // 10) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
+    // 10) إظهار أدوات نوافذ الأعضاء ومعلومات الغرفة
+    //     (قدرة مستخرجة من النسخة المفكوكة في lab/last)
+    // ============================================================
+    function enableMemberModalControls(root) {
+        (root || document).querySelectorAll('div.modal.in').forEach(modal => {
+            const classes = modal.className.split(/\s+/);
+            if (classes.length <= 2) return;
+
+            [
+                'span.fl.fa.btn.borderg.fa-envelope-o.unot',
+                'span.fl.fa.btn.borderg.fa-comment.upm',
+                'span.fl.fa.btn.borderg.fa-heart.ulike',
+                'span.fl.fa.btn.borderg.fa-ban.udelpic'
+            ].forEach(selector => {
+                modal.querySelectorAll(selector).forEach(control => {
+                    control.style.setProperty('visibility', 'visible', 'important');
+                    control.style.setProperty('display', 'inline-block', 'important');
+                    control.style.setProperty('opacity', '1', 'important');
+                });
+            });
+
+            modal.querySelectorAll('.u-room, .roomh').forEach(roomElement => {
+                const roomText = roomElement.textContent.trim();
+                if (roomText !== '' && !roomText.includes('undefined')) {
+                    roomElement.style.setProperty('visibility', 'visible', 'important');
+                    roomElement.style.setProperty('display', 'block', 'important');
+                    roomElement.style.setProperty('opacity', '1', 'important');
+                } else {
+                    roomElement.style.setProperty('display', 'none', 'important');
+                }
+            });
+        });
+    }
+
+    // ============================================================
+    // 11) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
     // ============================================================
     var jawalObserver = null;
 
@@ -797,6 +834,7 @@ javascript: (function() {
         checkHiddenUsers();
         enablePrivateChatOnS4();
         enableProfileModalOnS4();
+        enableMemberModalControls();
     }
 
     function init() {
