@@ -1,21 +1,56 @@
 javascript: (function() {
-    // gh0st.scr — نسخة قيد التطوير (تبدأ من القاعدة الموجودة في genesis/original.js)
-    // 1) إظهار الأزرار وإزالة الإطارات
-    function showUsers() {
-        document.querySelectorAll('.btn').forEach(el => el.style.display = 'block');
-        document.querySelectorAll('[class^="itarr"]').forEach(el => el.remove());
+    // gh0st.scr — نسخة قيد التطوير (دمج V1 + V3 عبر آلية "سلسلة احتياطية" fallback chain)
+    //
+    // آلية العمل: كل وظيفة مقسّمة إلى "محاولات" مرتبة بالأولوية (V1 أولاً ثم V3).
+    // تُنفَّذ المحاولة الأولى، وإن لم تجد عناصر لتعمل عليها (فشل الفحص)، تُنفَّذ المحاولة التالية تلقائياً.
+    // هذا يضمن عدم فقدان أي منطق من أي نسخة، ويجعل السكربت متوافقاً مع بنيات HTML مختلفة بين نسخ الشات.
+    //
+    // ملاحظة V2: النسخة الثانية (المُشفّرة بصيغة _0x) وصلت تالفة (رموز `[` `]` `!` استُبدلت بوسوم HTML
+    // أثناء اللصق)، فلا يمكن استخراج منطقها الحقيقي بثقة. تم حجز نقاط امتداد (TODO_V2_FALLBACK) في كل
+    // وظيفة أدناه لإضافة محاولتها كحلقة أخيرة في السلسلة بمجرد توفر نسخة نظيفة منها، دون كسر البنية الحالية.
 
-        if (typeof _ma56zznz2 !== 'undefined' && Array.isArray(_ma56zznz2)) {
-            _ma56zznz2.forEach(obj => {
-                document.querySelectorAll(`.${obj.cls}`).forEach(el => {
-                    el.classList.remove(obj.cls);
-                    el.style.display = 'block';
-                });
-            });
+    // أداة تنفيذ سلسلة المحاولات الاحتياطية: تُجرّب كل دالة بالترتيب حتى تُبلغ إحداها عن نجاح فعلي.
+    function runFallbackChain(stageName, attempts) {
+        for (let i = 0; i < attempts.length; i++) {
+            try {
+                const matched = attempts[i]();
+                if (matched) return true; // توقف عند أول محاولة أحدثت تغييراً فعلياً
+            } catch (e) {
+                console.warn(`⚠️ فشلت محاولة (${i + 1}) في مرحلة "${stageName}":`, e);
+            }
         }
+        return false;
     }
 
-    // 2) حاوية التنبيهات
+    // ============================================================
+    // 1) إظهار الأزرار وإزالة الإطارات المخفية
+    // ============================================================
+    function showUsers() {
+        // محاولة V1/V3 (متطابقتان منطقياً): إظهار الأزرار وحذف عناصر itarr
+        function attemptShowButtons() {
+            const btns = document.querySelectorAll('.btn');
+            btns.forEach(el => el.style.display = 'block');
+
+            document.querySelectorAll('[class^="itarr"]').forEach(el => el.remove());
+
+            if (typeof _ma56zznz2 !== 'undefined' && Array.isArray(_ma56zznz2)) {
+                _ma56zznz2.forEach(obj => {
+                    document.querySelectorAll(`.${obj.cls}`).forEach(el => {
+                        el.classList.remove(obj.cls);
+                        el.style.display = 'block';
+                    });
+                });
+            }
+            return btns.length > 0;
+        }
+
+        // TODO_V2_FALLBACK: إضافة محاولة مكافئة من النسخة 2 هنا عند توفرها نظيفة.
+        runFallbackChain('showUsers', [attemptShowButtons]);
+    }
+
+    // ============================================================
+    // 2) حاوية التنبيهات ونظام العرض (toast)
+    // ============================================================
     if (!document.getElementById("mobile-toast-container")) {
         const container = document.createElement("div");
         container.id = "mobile-toast-container";
@@ -33,7 +68,7 @@ javascript: (function() {
           <div style="font-weight:bold;text-align:center;margin-bottom:8px">🔔 تنبيه</div>
           <div style="display:flex;align-items:center;gap:8px">
             <img src="${user.pic}" style="width:32px;height:32px;border-radius:50%;border:1px solid #ccc">
-            ${user.icon ? `<img>` : ""}
+            ${user.icon ? `<img src="${user.icon}" style="width:16px;height:16px">` : ""}
             <div style="flex-grow:1">
               <div style="font-weight:bold">${user.name}</div>
               <div style="font-size:12px;color:gray">${user.hash}</div>
@@ -44,36 +79,63 @@ javascript: (function() {
         document.getElementById("mobile-toast-container").appendChild(toast);
     }
 
-    // 3) إظهار العناصر المخفية السابقة
+    // ============================================================
+    // 3) إظهار العناصر المخفية سابقاً
+    //    hiddenSelector مُدمَج من V1 (max-height) + V3 (display: none إضافية)
+    // ============================================================
     function showAllHigherRanksOnlyHidden() {
         const hiddenSelector = [
             ".uzr[style*='max-height: 0']",
-            ".uzr[style*='max-height:0']"
+            ".uzr[style*='max-height:0']",
+            ".uzr[style*='display: none']" // إضافة من V3
         ].join(",");
 
         document.querySelectorAll(hiddenSelector).forEach(el => {
             el.setAttribute('data-was-hidden', '1');
         });
 
-        document.querySelectorAll("[data-was-hidden='1']").forEach(el => {
+        const targets = document.querySelectorAll("[data-was-hidden='1']");
+        if (targets.length === 0) return;
+
+        targets.forEach(el => {
             const searchBox = document.getElementById('usearch');
             if (searchBox && searchBox.value.trim().length > 0) return;
 
-            if (!el._patched) {
-                const originalAdd = el.classList.add;
-                el.classList.add = function(...args) {
-                    const filtered = args.filter(cls => cls !== '__rv_me');
-                    return originalAdd.apply(this, filtered);
-                };
-                el._patched = true;
+            // محاولة V1: تصحيح classList.add لمنع إعادة إخفاء العنصر عبر __rv_me + إظهار صريح
+            function attemptRevealV1() {
+                if (!el._patched) {
+                    const originalAdd = el.classList.add;
+                    el.classList.add = function(...args) {
+                        const filtered = args.filter(cls => cls !== '__rv_me');
+                        return originalAdd.apply(this, filtered);
+                    };
+                    el._patched = true;
+                }
+
+                if (el.classList.contains('__rv_me')) {
+                    el.classList.remove('__rv_me');
+                }
+
+                el.style.display = 'block';
+                el.style.maxHeight = 'none';
+                return true;
             }
 
-            if (el.classList.contains('__rv_me')) {
-                el.classList.remove('__rv_me');
+            // محاولة V3: إعادة تعيين القيم الأصلية بدل فرض 'block'/'none' (بديل أخف تدخلاً)
+            function attemptRevealV3() {
+                el.style.display = '';
+                el.style.maxHeight = '';
+                return true;
             }
 
-            el.style.display = 'block';
-            el.style.maxHeight = 'none';
+            // إن لم يظهر العنصر فعلياً بعد محاولة V1 (لا يزال بعرض/ارتفاع صفري)، جرّب أسلوب V3
+            const revealedByV1 = attemptRevealV1();
+            const stillHidden = window.getComputedStyle(el).display === 'none';
+            if (revealedByV1 && stillHidden) {
+                attemptRevealV3();
+            }
+            // TODO_V2_FALLBACK: إضافة محاولة إظهار مكافئة من النسخة 2 هنا عند توفرها نظيفة.
+
             el.querySelectorAll('[style*="display: none"]').forEach(inner => {
                 inner.style.display = 'block';
             });
@@ -105,7 +167,10 @@ javascript: (function() {
         });
     }
 
+    // ============================================================
     // 4) إصلاح الإطارات والألوان
+    //    كشف itarr_/itarr مُدمَج من V1 + V3، وإزالة الكلاسات على أوسع نطاق (ahmed/mhmood/__rv_me)
+    // ============================================================
     function fixHiddenFrames() {
         document.querySelectorAll('.uzr').forEach(el => {
             const style = window.getComputedStyle(el);
@@ -114,8 +179,10 @@ javascript: (function() {
                 el.style.height = '';
             }
 
-            const frameImg = el.querySelector('.u-pic img[class^="itarr_"]');
-            if (frameImg) {
+            // محاولة V1: كشف إطار بصيغة itarr_ (مع underscore)
+            function attemptFrameV1() {
+                const frameImg = el.querySelector('.u-pic img[class^="itarr_"]');
+                if (!frameImg) return false;
                 frameImg.classList.forEach(cls => {
                     if (cls.startsWith('itarr_')) {
                         const frameName = cls.replace('itarr_', '').toLowerCase();
@@ -124,8 +191,28 @@ javascript: (function() {
                         }
                     }
                 });
+                return true;
             }
 
+            // محاولة V3: كشف إطار بصيغة itarr بدون underscore (بنيات شات مختلفة)
+            function attemptFrameV3() {
+                const frameImg = el.querySelector('.u-pic img[class^="itarr"]');
+                if (!frameImg) return false;
+                frameImg.classList.forEach(cls => {
+                    if (cls.startsWith('itarr')) {
+                        const frameName = cls.replace('itarr', '').toLowerCase();
+                        if (el.classList.contains(frameName)) {
+                            el.classList.remove(frameName);
+                        }
+                    }
+                });
+                return true;
+            }
+
+            // TODO_V2_FALLBACK: إضافة محاولة كشف إطار مكافئة من النسخة 2 هنا عند توفرها نظيفة.
+            runFallbackChain('fixHiddenFrames:frame', [attemptFrameV1, attemptFrameV3]);
+
+            // إزالة الكلاسات الخاصة (اتحاد V1 الشامل: ahmed + mhmood + __rv_me، وهو أوسع من قائمة V3)
             ['ahmed', 'mhmood', '__rv_me'].forEach(cls => {
                 if (el.classList.contains(cls)) {
                     el.classList.remove(cls);
@@ -149,7 +236,9 @@ javascript: (function() {
         });
     }
 
+    // ============================================================
     // 5) فحص المخفيين وإظهار التنبيه
+    // ============================================================
     function checkHiddenUsers() {
         document.querySelectorAll('.uzr.inroom').forEach(userEl => {
             const statusImg = userEl.querySelector('img.ustat');
@@ -186,9 +275,13 @@ javascript: (function() {
                 alertedUsers.delete(uid);
             }
         }
+        // TODO_V2_FALLBACK: إضافة محاولة كشف مخفيين مكافئة من النسخة 2 هنا عند توفرها نظيفة.
     }
 
-    // 6) إضافة فتح الخاص عند الضغط على أصحاب s4.png
+    // ============================================================
+    // 6) فتح الخاص عند الضغط على أصحاب الحالة المخفية (s4.png)
+    //    موجودة فقط في V1 — لا يوجد بديل في V3، تُعتمد مباشرة.
+    // ============================================================
     function enablePrivateChatOnS4() {
         document.querySelectorAll('#users .uzr').forEach(user => {
             const img = user.querySelector('img.ustat');
@@ -210,9 +303,12 @@ javascript: (function() {
                 user._privateBound = true; // منع تكرار الحدث
             }
         });
+        // TODO_V2_FALLBACK: إضافة محاولة مكافئة من النسخة 2 هنا عند توفرها نظيفة.
     }
 
-    // 7) مراقبة DOM
+    // ============================================================
+    // 7) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
+    // ============================================================
     new MutationObserver(() => {
         const searchBox = document.getElementById('usearch');
         if (searchBox && searchBox.value.trim().length > 0) return;
@@ -234,5 +330,5 @@ javascript: (function() {
     checkHiddenUsers();
     enablePrivateChatOnS4();
 
-    console.log("✅ تم التفعيل: إظهار الأزرار + المخفيين + إصلاح الإطارات والألوان + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png");
+    console.log("✅ تم التفعيل: إظهار الأزرار + المخفيين + إصلاح جميع الإطارات والألوان (بما فيها ahmed + mhmood) + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png [دمج V1+V3 بسلسلة احتياطية]");
 })();
