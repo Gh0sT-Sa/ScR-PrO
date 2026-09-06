@@ -1,0 +1,16 @@
+
+        #trend-label {
+            width: 100% !important;
+            box-sizing: border-box !important;
+            margin-top: 6px !important;
+            margin-bottom: 8px !important;
+            text-align: center !important;
+            font-weight: bold !important;
+            display: block !important;
+            background: url('https://i.postimg.cc/YjBKNPTr/Whats-App-Video-2026-08-19-at-1011.gif') no-repeat center center;
+            background-size: 100%;
+        }
+        #rooms {
+            width: 100% !important;
+        }
+    
