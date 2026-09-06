@@ -8,6 +8,10 @@ javascript: (function() {
     // ملاحظة V2: النسخة الثانية (المُشفّرة بصيغة _0x) وصلت تالفة (رموز `[` `]` `!` استُبدلت بوسوم HTML
     // أثناء اللصق)، فلا يمكن استخراج منطقها الحقيقي بثقة. تم حجز نقاط امتداد (TODO_V2_FALLBACK) في كل
     // وظيفة أدناه لإضافة محاولتها كحلقة أخيرة في السلسلة بمجرد توفر نسخة نظيفة منها، دون كسر البنية الحالية.
+    //
+    // تحديث لاحق: أُضيفت ثلاث قدرات جديدة (دون حذف أي شيء) من سكربت مُدمَج ورده المستخدم:
+    // استخراج ID عضو معيّن واعتراض WebSocket الحقيقي (القسم 7)، نافذة البروفايل الحديثة
+    // وتتبع الغرف (القسم 8)، وربط فتح نافذة البروفايل بالمستخدمين ذوي الحالة المخفية (القسم 9).
 
     // أداة تنفيذ سلسلة المحاولات الاحتياطية: تُجرّب كل دالة بالترتيب حتى تُبلغ إحداها عن نجاح فعلي.
     function runFallbackChain(stageName, attempts) {
@@ -44,8 +48,17 @@ javascript: (function() {
             return btns.length > 0;
         }
 
+        // محاولة إضافية (من دمج لاحق): إظهار عبر jQuery إن كان متوفراً في الصفحة
+        function attemptShowButtonsJQuery() {
+            if (typeof $ !== 'function') return false;
+            $('.uzr').show();
+            $('.btn').show();
+            $('[class^="itarr"]').remove();
+            return true;
+        }
+
         // TODO_V2_FALLBACK: إضافة محاولة مكافئة من النسخة 2 هنا عند توفرها نظيفة.
-        runFallbackChain('showUsers', [attemptShowButtons]);
+        runFallbackChain('showUsers', [attemptShowButtons, attemptShowButtonsJQuery]);
     }
 
     // ============================================================
@@ -307,7 +320,346 @@ javascript: (function() {
     }
 
     // ============================================================
-    // 7) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
+    // 7) استخراج ID عضو معيّن واعتراض اتصال WebSocket الحقيقي
+    //    (إضافة جديدة: أداة تشغَّل مرة واحدة عند التحميل بطلب نك نيم من المستخدم،
+    //    ثم تحفظ الاتصال الحقيقي في window._realSocket_ عند أول رسالة صادرة تحوي الـ ID)
+    // ============================================================
+    function extractIdAndInterceptSocket() {
+        const nick = prompt("🧠 ألصق هنا النك نيم الذي تريد استخراج الـ ID له:");
+        if (!nick || nick.length < 2) {
+            alert("❌ النك نيم غير صالح أو فارغ.");
+            return false;
+        }
+
+        const users = document.querySelectorAll('.uzr');
+        let found = false;
+        let extractedId = "";
+
+        users.forEach(div => {
+            const n = div.getAttribute('n');
+            if (n && n.includes(nick)) {
+                const uidClass = [...div.classList].find(c => c.startsWith('uid'));
+                if (uidClass) {
+                    extractedId = uidClass.slice(3); // إزالة "uid"
+                    found = true;
+                }
+            }
+        });
+
+        if (!found) {
+            alert("⚠ لم يتم العثور على أي عضوية بهذا النك نيم.");
+            return false;
+        }
+
+        const myId = extractedId;
+        if (!window._realSocket_send_patched_) {
+            const originalSend = WebSocket.prototype.send;
+            WebSocket.prototype.send = function(...args) {
+                const raw = args[0];
+                if (typeof raw === "string" && raw.startsWith("42") && raw.includes('"msg"') && raw.includes(myId)) {
+                    try {
+                        const parsed = JSON.parse(raw.slice(2));
+                        const [type, payload] = parsed;
+                        if (type === "msg" && typeof payload === "object") {
+                            const data = payload.data || {};
+                            if (JSON.stringify(data).includes(myId)) {
+                                window._realSocket_ = this;
+                                console.log("✅ تم حفظ الاتصال الحقيقي في window._realSocket_");
+                            }
+                        }
+                    } catch (err) {
+                        console.warn("⚠ فشل في تحليل الرسالة:", raw);
+                    }
+                }
+                return originalSend.apply(this, args);
+            };
+            window._realSocket_send_patched_ = true;
+        }
+
+        alert(`✅ تم استخراج الـ ID:\n${myId}\n\n📡 بدأ اعتراض WebSocket...`);
+        console.log("📡 بدأ اعتراض WebSocket... بانتظار أول رسالة تحتوي على المعرف:", myId);
+        return true;
+    }
+
+    // ============================================================
+    // 8) نظام نافذة البروفايل الحديثة (Modal) + تتبع الغرف عبر WebSocket
+    //    (إضافة جديدة: تعرض بروفايل العضو مع صورته، رسالته، غرفته الحالية،
+    //    وأزرار محادثة/تنبيه/إعجاب عبر sendSocketPayload)
+    // ============================================================
+    (function setupProfileModalSystem() {
+
+        function showToast(t, e = 3000) {
+            if (!document.getElementById("mobile-toast-container")) {
+                const c = document.createElement("div");
+                c.id = "mobile-toast-container";
+                c.style = "position:fixed;top:15px;left:50%;transform:translateX(-50%);z-index:99999;max-width:320px;text-align:center";
+                document.body.appendChild(c);
+            }
+            const o = document.createElement("div");
+            o.textContent = t;
+            o.style = "background:#333;color:#fff;padding:8px 12px;margin-top:8px;border-radius:8px;cursor:pointer;font-size:13px;display:inline-block;box-shadow:0 2px 6px rgba(0,0,0,.3)";
+            o.onclick = () => o.remove();
+            document.getElementById("mobile-toast-container").appendChild(o);
+            e > 0 && setTimeout(() => o.remove(), e);
+        }
+
+        function sendSocketPayload(cmd, data) {
+            if (typeof window._realSocket_ === "undefined" || window._realSocket_.readyState !== 1) {
+                console.warn("⚠ لا يوجد اتصال WebSocket جاهز");
+                return false;
+            }
+            try {
+                window._realSocket_.send("42" + JSON.stringify(["msg", { cmd, data }]));
+                return true;
+            } catch (e) {
+                console.error("❌ فشل الإرسال:", e);
+                return false;
+            }
+        }
+
+        // 🟢 نظام تتبع الغرف
+        const userRoomMap = {};
+        const roomNames = {};
+
+        function attachSocketListener(sock) {
+            if (!sock || typeof sock.addEventListener !== 'function') return;
+            if (sock.__profile_listener_attached) return;
+            sock.__profile_listener_attached = true;
+
+            sock.addEventListener("message", function(event) {
+                try {
+                    const data = event.data;
+                    if (typeof data === "string" && data.startsWith("42")) {
+                        const payload = JSON.parse(data.slice(2));
+                        const [eventName, content] = payload;
+                        if (eventName === "msg" && content?.cmd === "wr" && Array.isArray(content.data)) {
+                            const [userId, roomId] = content.data;
+                            userRoomMap[userId] = roomId;
+                            const roomEl = document.querySelector(`.room.r${roomId}`);
+                            const roomName = roomEl?.querySelector(".u-topic")?.textContent.trim();
+                            if (roomName) roomNames[roomId] = roomName;
+                        }
+                    }
+                } catch (e) {}
+            });
+        }
+
+        if (window._realSocket_) {
+            attachSocketListener(window._realSocket_);
+        } else {
+            const sInterval = setInterval(() => {
+                if (window._realSocket_) {
+                    attachSocketListener(window._realSocket_);
+                    clearInterval(sInterval);
+                    console.log("✅ تم ربط مستمع WebSocket بعد ظهور window._realSocket_");
+                }
+            }, 500);
+        }
+
+        if (!document.getElementById("cp-showprofile-modal")) {
+            const style = document.createElement("style");
+            style.textContent = `
+  #cp-showprofile-modal {position:fixed;z-index:100000;top:50%;left:50%;transform:translate(-50%,-50%);background:#0b4c4d;color:#fff;border-radius:6px;box-shadow:0 0 25px rgba(0,0,0,.5);width:340px;max-width:95%;font-family:Arial;overflow:hidden;display:none;}
+  #cp-sp-header {background:#008c8d;color:white;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;font-weight:bold;font-size:15px;}
+  .modal-title {display:flex;align-items:center;gap:6px;max-width:90%;overflow:hidden;}
+  #cp-user-ico {height:18px;object-fit:contain;flex-shrink:0;}
+  #cp-user-banner {height:30px;object-fit:contain;flex-shrink:0;}
+  #cp-user-name {font-weight:bold;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cp-sp-close {cursor:pointer;background:none;border:none;color:#fff;font-size:18px;}
+  #cp-user-pic {width:100%;height:200px;background-size:contain;background-repeat:no-repeat;background-position:50% 50%;border-bottom:1px solid rgba(255,255,255,.1);}
+  #cp-user-pic-inner {width:100%;height:100%;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);background-size:contain;background-repeat:no-repeat;background-position:50% 50%;}
+  #cp-user-msg {text-align:center;padding:6px 8px;color:#ddd;border-bottom:1px solid rgba(255,255,255,.1);font-size:13px;}
+  #cp-action-box {padding:10px;display:flex;gap:8px;justify-content:space-between;}
+  .cp-sp-btn {flex:1;background:#17171b;border:1px solid rgba(255,255,255,.05);color:#fff;padding:10px;border-radius:6px;text-align:center;cursor:pointer;font-size:14px;}
+  .cp-sp-btn:hover {background:#262629;}
+  .cp-sp-btn.active {background:#1a73e8;font-weight:bold;}
+  #cp-sp-notify-box {display:none;padding:10px;border-top:1px solid rgba(255,255,255,.05);}
+  #cp-room-box{
+  text-align: right !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+}
+  #cp-room-box div {padding:4px 22px;background:#5c3a1e;color:#fff;border-radius:5px;font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;}
+  #cp-room-box img {max-width:24px;border-radius:4px;}
+  `;
+            document.head.appendChild(style);
+
+            const modal = document.createElement("div");
+            modal.id = "cp-showprofile-modal";
+            modal.innerHTML = `
+    <div id="cp-sp-header">
+      <span class="modal-title">
+        <img id="cp-user-ico">
+        <img id="cp-user-banner" class="fl u-ico" alt="">
+        <span id="cp-user-name"></span>
+      </span>
+      <button class="cp-sp-close">×</button>
+    </div>
+    <div id="cp-user-pic" class="fl u-pic fitimg"><div id="cp-user-pic-inner" class="bgf fl u-pic fitimg"></div></div>
+    <div id="cp-user-msg"></div>
+    <div id="cp-room-box"></div>
+    <div id="cp-action-box">
+      <div class="cp-sp-btn" id="cp-sp-private">محادثة</div>
+      <div class="cp-sp-btn" id="cp-sp-notify">تنبيه</div>
+      <div class="cp-sp-btn" id="cp-sp-like">إعجاب</div>
+    </div>
+    <div id="cp-sp-notify-box">
+      <textarea id="cp-sp-notify-txt" placeholder="اكتب التنبيه هنا..." style="width:100%;height:70px;background:#0b0b0d;color:white;border-radius:6px;padding:8px;border:1px solid rgba(255,255,255,.1);"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="cp-sp-small" id="cp-sp-send-not" style="flex:1;padding:8px;border-radius:6px;background:#1a73e8;border:none;color:#fff;">إرسال التنبيه</button>
+        <button class="cp-sp-small secondary" id="cp-sp-cancel-not" style="flex:1;padding:8px;border-radius:6px;background:#777;border:none;color:#fff;">إلغاء</button>
+      </div>
+    </div>
+  `;
+            document.body.appendChild(modal);
+
+            const close = modal.querySelector(".cp-sp-close"),
+                like = modal.querySelector("#cp-sp-like"),
+                notify = modal.querySelector("#cp-sp-notify"),
+                chat = modal.querySelector("#cp-sp-private"),
+                box = modal.querySelector("#cp-sp-notify-box"),
+                input = modal.querySelector("#cp-sp-notify-txt"),
+                send = modal.querySelector("#cp-sp-send-not"),
+                cancel = modal.querySelector("#cp-sp-cancel-not"),
+                userNameSpan = modal.querySelector("#cp-user-name"),
+                userPic = modal.querySelector("#cp-user-pic"),
+                roomMsg = modal.querySelector("#cp-user-msg"),
+                icoEl = modal.querySelector("#cp-user-ico"),
+                bannerEl = modal.querySelector("#cp-user-banner"),
+                roomBox = modal.querySelector("#cp-room-box");
+
+            close.onclick = () => hide();
+            cancel.onclick = () => {
+                input.value = "";
+                hideNotify();
+            };
+
+            let target = { userId: null, username: null };
+
+            function show(id, name, bgImg) {
+                target.userId = id;
+                target.username = name || "";
+
+                const card = document.querySelector(".uid" + id);
+                const topic = card?.querySelector(".u-topic")?.textContent.trim() || name || id;
+                userNameSpan.textContent = topic;
+
+                // 🟢 اسم الغرفة + صورة الغرفة
+                const roomId = userRoomMap[id];
+                const roomName = roomNames[roomId] || "ليس في غرفة";
+                if (roomId) {
+                    const roomEl = document.querySelector(".room.r" + roomId);
+                    const roomImg = roomEl?.querySelector(".u-pic")?.style.backgroundImage.replace(/^url\(["']?|["']?\)$/g, "").trim() || "";
+                    roomBox.innerHTML = `
+        <div onclick="rjoin('${roomId}')">
+          ${roomImg ? `<img src="${roomImg}">` : ""}
+          ${roomName}
+        </div>
+      `;
+                } else {
+                    roomBox.innerHTML = `<div style="color:#aaa;font-size:13px;">ليس في غرفة</div>`;
+                }
+
+                const ico = card?.querySelector(".u-ico")?.src || "";
+                if (ico) bannerEl.src = ico; else bannerEl.removeAttribute("src");
+                const smallIco = card?.querySelector(".u-ico-small")?.src || "";
+                if (smallIco) icoEl.src = smallIco; else icoEl.removeAttribute("src");
+
+                userPic.style.backgroundImage = bgImg ? `url(${bgImg})` : "none";
+                const innerPic = modal.querySelector("#cp-user-pic-inner");
+                if (innerPic) innerPic.style.backgroundImage = bgImg ? `url(${bgImg})` : "none";
+
+                const msg = card?.querySelector(".u-msg")?.textContent.trim() || "";
+                roomMsg.textContent = msg;
+
+                input.value = "";
+                hideNotify();
+                modal.style.display = "block";
+            }
+
+            function hide() {
+                modal.style.display = "none";
+                target = { userId: null, username: null };
+            }
+
+            function showNotify() {
+                box.style.display = "block";
+            }
+
+            function hideNotify() {
+                box.style.display = "none";
+            }
+
+            like.onclick = () => {
+                const id = target.userId;
+                if (!id) return;
+                sendSocketPayload("ccvimn", { cmd: "like", id }) ?
+                    (showToast("✅ تم إرسال الإعجاب", 3000),
+                        like.classList.add("active"),
+                        setTimeout(() => like.classList.remove("active"), 1500)) :
+                    showToast("❌ فشل إرسال الإعجاب", 4000);
+            };
+
+            notify.onclick = () => {
+                showNotify();
+            };
+            send.onclick = () => {
+                const msg = input.value.trim(),
+                    id = target.userId;
+                if (!msg) return alert("اكتب نص التنبيه أولاً");
+                sendSocketPayload("ccvimn", { cmd: "not", id, msg }) ?
+                    (showToast("✅ تم إرسال التنبيه", 3000),
+                        input.value = "",
+                        hideNotify(),
+                        hide()) :
+                    alert("❌ فشل الإرسال");
+            };
+            chat.onclick = () => {
+                const id = target.userId;
+                if (id) {
+                    if (typeof openw === "function") {
+                        openw(id, true);
+                        hide();
+                    } else showToast("❌ دالة openw غير موجودة");
+                }
+            };
+
+            window.cpShowProfile = { show, hide };
+        }
+    })();
+
+    // ============================================================
+    // 9) تفعيل فتح نافذة البروفايل عند الضغط على مستخدمين بحالة مخفية (s4.png)
+    //    إضافة موازية للقسم (6) الذي يفتح الخاص مباشرة؛ هذه الوظيفة تفتح نافذة
+    //    البروفايل بدلاً من ذلك عبر window.cpShowProfile، دون إزالة سلوك القسم (6).
+    // ============================================================
+    function enableProfileModalOnS4(root) {
+        (root || document).querySelectorAll("div").forEach(function(el) {
+            try {
+                const status = el.querySelector && el.querySelector('img[src*="s4.png"]'),
+                    uid = [...el.classList].find(c => c && c.startsWith && c.startsWith("uid"));
+                if (status && uid && !el._profileBound) {
+                    el._profileBound = true;
+                    el.style.cursor = "pointer";
+                    el.onclick = function() {
+                        const id = uid.replace("uid", "");
+                        const topic = el.querySelector(".u-topic")?.textContent.trim() || "";
+                        const picDiv = el.querySelector(".u-pic");
+                        const rawBg = picDiv?.style.backgroundImage || "";
+                        const bgImg = rawBg.replace(/^url\(["']?|["']?\)$/g, "").trim()
+                            .replace(/\.png\.png$/, ".png")
+                            .replace(/\.jpg\.png$/, ".jpg")
+                            .replace(/\.jpeg\.png$/, ".jpeg");
+                        window.cpShowProfile?.show ? window.cpShowProfile.show(id, topic, bgImg) : alert("نافذة شو بروفايل غير مفعّلة بعد");
+                    };
+                }
+            } catch (e) {}
+        });
+    }
+
+    // ============================================================
+    // 10) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
     // ============================================================
     new MutationObserver(() => {
         const searchBox = document.getElementById('usearch');
@@ -318,6 +670,7 @@ javascript: (function() {
         fixHiddenFrames();
         checkHiddenUsers();
         enablePrivateChatOnS4();
+        enableProfileModalOnS4();
     }).observe(document.body, {
         childList: true,
         subtree: true
@@ -329,6 +682,13 @@ javascript: (function() {
     fixHiddenFrames();
     checkHiddenUsers();
     enablePrivateChatOnS4();
+    enableProfileModalOnS4();
 
-    console.log("✅ تم التفعيل: إظهار الأزرار + المخفيين + إصلاح جميع الإطارات والألوان (بما فيها ahmed + mhmood) + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png [دمج V1+V3 بسلسلة احتياطية]");
+    console.log("✅ تم التفعيل: إظهار الأزرار + المخفيين + إصلاح جميع الإطارات والألوان (بما فيها ahmed + mhmood) + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png + نافذة البروفايل الحديثة + تتبع الغرف [دمج V1+V3 بسلسلة احتياطية + إضافات جديدة]");
+
+    // استخراج ID عضو معيّن واعتراض WebSocket الحقيقي (القسم 7) — تُستدعى مرة واحدة
+    // عند تفعيل السكربت (نفس سلوك النسخة الأصلية المُرسلة)، وتبقى متاحة أيضاً
+    // للاستدعاء اليدوي لاحقاً عبر console: extractIdAndInterceptSocket()
+    window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
+    extractIdAndInterceptSocket();
 })();
