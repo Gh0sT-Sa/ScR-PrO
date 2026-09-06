@@ -447,11 +447,17 @@ javascript: (function() {
         if (window._realSocket_) {
             attachSocketListener(window._realSocket_);
         } else {
+            let sAttempts = 0;
+            const sMaxAttempts = 120; // ~60 ثانية كحد أقصى قبل التوقف عن الانتظار
             const sInterval = setInterval(() => {
+                sAttempts++;
                 if (window._realSocket_) {
                     attachSocketListener(window._realSocket_);
                     clearInterval(sInterval);
                     console.log("✅ تم ربط مستمع WebSocket بعد ظهور window._realSocket_");
+                } else if (sAttempts >= sMaxAttempts) {
+                    clearInterval(sInterval);
+                    console.warn("⚠ لم يظهر window._realSocket_ خلال المهلة المحددة، تم إيقاف الانتظار.");
                 }
             }, 500);
         }
@@ -545,20 +551,30 @@ javascript: (function() {
                 const topic = card?.querySelector(".u-topic")?.textContent.trim() || name || id;
                 userNameSpan.textContent = topic;
 
-                // 🟢 اسم الغرفة + صورة الغرفة
+                // 🟢 اسم الغرفة + صورة الغرفة (بناء عبر DOM APIs بدل innerHTML لتفادي XSS)
                 const roomId = userRoomMap[id];
                 const roomName = roomNames[roomId] || "ليس في غرفة";
+                roomBox.textContent = "";
                 if (roomId) {
                     const roomEl = document.querySelector(".room.r" + roomId);
                     const roomImg = roomEl?.querySelector(".u-pic")?.style.backgroundImage.replace(/^url\(["']?|["']?\)$/g, "").trim() || "";
-                    roomBox.innerHTML = `
-        <div onclick="rjoin('${roomId}')">
-          ${roomImg ? `<img src="${roomImg}">` : ""}
-          ${roomName}
-        </div>
-      `;
+
+                    const roomDiv = document.createElement("div");
+                    roomDiv.addEventListener("click", function() {
+                        if (typeof rjoin === "function") rjoin(roomId);
+                    });
+                    if (roomImg) {
+                        const imgEl = document.createElement("img");
+                        imgEl.src = roomImg;
+                        roomDiv.appendChild(imgEl);
+                    }
+                    roomDiv.appendChild(document.createTextNode(roomName));
+                    roomBox.appendChild(roomDiv);
                 } else {
-                    roomBox.innerHTML = `<div style="color:#aaa;font-size:13px;">ليس في غرفة</div>`;
+                    const emptyDiv = document.createElement("div");
+                    emptyDiv.style = "color:#aaa;font-size:13px;";
+                    emptyDiv.textContent = "ليس في غرفة";
+                    roomBox.appendChild(emptyDiv);
                 }
 
                 const ico = card?.querySelector(".u-ico")?.src || "";
@@ -686,9 +702,9 @@ javascript: (function() {
 
     console.log("✅ تم التفعيل: إظهار الأزرار + المخفيين + إصلاح جميع الإطارات والألوان (بما فيها ahmed + mhmood) + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png + نافذة البروفايل الحديثة + تتبع الغرف [دمج V1+V3 بسلسلة احتياطية + إضافات جديدة]");
 
-    // استخراج ID عضو معيّن واعتراض WebSocket الحقيقي (القسم 7) — تُستدعى مرة واحدة
-    // عند تفعيل السكربت (نفس سلوك النسخة الأصلية المُرسلة)، وتبقى متاحة أيضاً
-    // للاستدعاء اليدوي لاحقاً عبر console: extractIdAndInterceptSocket()
+    // استخراج ID عضو معيّن واعتراض WebSocket الحقيقي (القسم 7): أداة تفاعلية تُظهر
+    // نافذة prompt() لذلك لا تُستدعى تلقائياً هنا (لتفادي حظر الصفحة بها في كل تفعيل
+    // للسكربت أو عند كل تشغيل لـ MutationObserver). تبقى متاحة للاستدعاء اليدوي
+    // عند الحاجة عبر console: extractIdAndInterceptSocket()
     window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
-    extractIdAndInterceptSocket();
 })();
