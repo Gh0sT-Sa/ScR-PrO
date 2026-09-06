@@ -404,7 +404,7 @@ javascript: (function() {
         }
 
         function sendSocketPayload(cmd, data) {
-            if (typeof window._realSocket_ === "undefined" || window._realSocket_.readyState !== 1) {
+            if (!window._realSocket_ || window._realSocket_.readyState !== 1) {
                 console.warn("⚠ لا يوجد اتصال WebSocket جاهز");
                 return false;
             }
@@ -610,11 +610,13 @@ javascript: (function() {
             like.onclick = () => {
                 const id = target.userId;
                 if (!id) return;
-                sendSocketPayload("ccvimn", { cmd: "like", id }) ?
-                    (showToast("✅ تم إرسال الإعجاب", 3000),
-                        like.classList.add("active"),
-                        setTimeout(() => like.classList.remove("active"), 1500)) :
+                if (sendSocketPayload("ccvimn", { cmd: "like", id })) {
+                    showToast("✅ تم إرسال الإعجاب", 3000);
+                    like.classList.add("active");
+                    setTimeout(() => like.classList.remove("active"), 1500);
+                } else {
                     showToast("❌ فشل إرسال الإعجاب", 4000);
+                }
             };
 
             notify.onclick = () => {
@@ -624,12 +626,14 @@ javascript: (function() {
                 const msg = input.value.trim(),
                     id = target.userId;
                 if (!msg) return alert("اكتب نص التنبيه أولاً");
-                sendSocketPayload("ccvimn", { cmd: "not", id, msg }) ?
-                    (showToast("✅ تم إرسال التنبيه", 3000),
-                        input.value = "",
-                        hideNotify(),
-                        hide()) :
+                if (sendSocketPayload("ccvimn", { cmd: "not", id, msg })) {
+                    showToast("✅ تم إرسال التنبيه", 3000);
+                    input.value = "";
+                    hideNotify();
+                    hide();
+                } else {
                     alert("❌ فشل الإرسال");
+                }
             };
             chat.onclick = () => {
                 const id = target.userId;
@@ -660,7 +664,7 @@ javascript: (function() {
                     el.style.cursor = "pointer";
                     el.onclick = function() {
                         const id = uid.replace("uid", "");
-                        const topic = el.querySelector(".u-topic")?.textContent.trim() || "";
+                        const topic = el.querySelector(".u-topic")?.textContent?.trim() || "";
                         const picDiv = el.querySelector(".u-pic");
                         const rawBg = picDiv?.style.backgroundImage || "";
                         const bgImg = rawBg.replace(/^url\(["']?|["']?\)$/g, "").trim()
