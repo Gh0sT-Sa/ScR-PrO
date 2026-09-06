@@ -436,7 +436,7 @@ javascript: (function() {
                             const [userId, roomId] = content.data;
                             userRoomMap[userId] = roomId;
                             const roomEl = document.querySelector(`.room.r${roomId}`);
-                            const roomName = roomEl?.querySelector(".u-topic")?.textContent.trim();
+                            const roomName = roomEl?.querySelector(".u-topic")?.textContent?.trim();
                             if (roomName) roomNames[roomId] = roomName;
                         }
                     }
@@ -548,7 +548,7 @@ javascript: (function() {
                 target.username = name || "";
 
                 const card = document.querySelector(".uid" + id);
-                const topic = card?.querySelector(".u-topic")?.textContent.trim() || name || id;
+                const topic = card?.querySelector(".u-topic")?.textContent?.trim() || name || id;
                 userNameSpan.textContent = topic;
 
                 // 🟢 اسم الغرفة + صورة الغرفة (بناء عبر DOM APIs بدل innerHTML لتفادي XSS)
@@ -557,7 +557,7 @@ javascript: (function() {
                 roomBox.textContent = "";
                 if (roomId) {
                     const roomEl = document.querySelector(".room.r" + roomId);
-                    const roomImg = roomEl?.querySelector(".u-pic")?.style.backgroundImage.replace(/^url\(["']?|["']?\)$/g, "").trim() || "";
+                    const roomImg = roomEl?.querySelector(".u-pic")?.style?.backgroundImage?.replace(/^url\(["']?|["']?\)$/g, "")?.trim() || "";
 
                     const roomDiv = document.createElement("div");
                     roomDiv.addEventListener("click", function() {
@@ -586,7 +586,7 @@ javascript: (function() {
                 const innerPic = modal.querySelector("#cp-user-pic-inner");
                 if (innerPic) innerPic.style.backgroundImage = bgImg ? `url(${bgImg})` : "none";
 
-                const msg = card?.querySelector(".u-msg")?.textContent.trim() || "";
+                const msg = card?.querySelector(".u-msg")?.textContent?.trim() || "";
                 roomMsg.textContent = msg;
 
                 input.value = "";
