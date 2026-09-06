@@ -12,6 +12,106 @@ javascript: (function() {
     // تحديث لاحق: أُضيفت ثلاث قدرات جديدة (دون حذف أي شيء) من سكربت مُدمَج ورده المستخدم:
     // استخراج ID عضو معيّن واعتراض WebSocket الحقيقي (القسم 7)، نافذة البروفايل الحديثة
     // وتتبع الغرف (القسم 8)، وربط فتح نافذة البروفايل بالمستخدمين ذوي الحالة المخفية (القسم 9).
+    //
+    // تحديث معماري: تحوّل السكربت إلى معمارية "تعرّف تلقائي على النسخة" (auto-detect multi-host).
+    // كل نسخة شات (جوال هوست / تايقر هوست / فون هوست / يوكام هوست / هايبر هوست) أصبحت "وحدة" مستقلة
+    // ضمن ScriptPro.hosts، ولا يتم تفعيل أي منطق إلا بعد التعرّف الفعلي على النسخة المطابقة لصفحة الشات
+    // الحالية عبر detect()، فتُستدعى init() الخاصة بها فقط. منطق جوال هوست أدناه (وحدة jawal) هو نفس
+    // المنطق الذي كان يعمل تلقائياً سابقاً، دون أي حذف أو تغيير سلوكي، فقط أصبح محصوراً داخل وحدته
+    // ولا يعمل إلا بعد التعرّف على نسخة جوال هوست تحديداً. باقي النسخ (tiger/foon/ucam/hyper) محجوزة
+    // كوحدات فارغة (stubs) بانتظار رفع ملفات كل نسخة لتحليلها وبناء منطقها الخاص، دون التأثير على جوال هوست.
+    var ScriptPro = {
+        version: '6.0.0-multi-host',
+        activeHost: null,
+        hosts: {}
+    };
+
+    // ============================================================
+    // وحدة: شات جوال هوست (Jawal Host) — تجميع كل منطق §1..§9 الحالي داخل وحدة مستقلة
+    // ============================================================
+    ScriptPro.hosts.jawal = (function() {
+        // كشف نسخة جوال هوست: عناصر .uzr داخل حاوية #users هي البنية المميزة لهذه النسخة
+        // (مؤكدة من ملفات samples/Jawal-host مثل shbl50000.js وshbl3-m.js وstr-shbl.js).
+        function detect() {
+            try {
+                return !!(document.querySelector('#users .uzr') || document.querySelector('.uzr.inroom'));
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // أداة استعادة Optional Chaining (?.) مع أمان كامل للمتصفحات القديمة:
+        // يُحاول تجميع (compile) نسخة "حديثة" تحتوي فعلياً على صيغة ?. عبر new Function().
+        // في المحركات التي لا تدعم هذه الصيغة يفشل new Function() بخطأ SyntaxError وقت
+        // التجميع فقط (وليس وقت تحليل باقي السكربت، لأن الكود موجود كسلسلة نصية لم تُفسَّر
+        // بعد)، فيتم التقاطه هنا بأمان والرجوع لنسخة بديلة (fallback) مكافئة تماماً في
+        // السلوك مبنية بصيغة ES5 قياسية. هذا يعيد استخدام ?. فعلياً في كل محرك يدعمها،
+        // مع ضمان عدم توقف تنفيذ السكربت بالكامل في أي محرك لا يدعمها.
+        function compileOptionalChaining(argNames, modernBodySrc, fallbackFn) {
+            try {
+                return new Function(argNames.join(','), modernBodySrc);
+            } catch (e) {
+                return fallbackFn;
+            }
+        }
+
+        // مجموعة أدوات مبنية على compileOptionalChaining، تغطي كل أنماط الاستخدام الـ13
+        // التي كانت تعتمد على ?. في هذا الملف (قراءة نص/خاصية/سمة/نمط بأمان + استدعاء دالة اختيارية).
+        const oc = {
+            // نص عنصر فرعي (querySelector) بعد trim، أو "" إن لم يوجد
+            text: compileOptionalChaining(
+                ['root', 'selector'],
+                'return root?.querySelector(selector)?.textContent?.trim() || "";',
+                function(root, selector) {
+                    const el = root && root.querySelector ? root.querySelector(selector) : null;
+                    return ((el && el.textContent) ? el.textContent.trim() : "") || "";
+                }
+            ),
+            // قيمة سمة (attribute) للعنصر نفسه بعد trim، أو "" إن لم توجد
+            attr: compileOptionalChaining(
+                ['el', 'name'],
+                'return el?.getAttribute(name)?.trim() || "";',
+                function(el, name) {
+                    const v = el && el.getAttribute ? el.getAttribute(name) : null;
+                    return (v ? v.trim() : "") || "";
+                }
+            ),
+            // خاصية عنصر فرعي (مثل src) بأمان، أو "" إن لم يوجد العنصر
+            prop: compileOptionalChaining(
+                ['root', 'selector', 'propName'],
+                'return root?.querySelector(selector)?.[propName] || "";',
+                function(root, selector, propName) {
+                    const el = root && root.querySelector ? root.querySelector(selector) : null;
+                    return (el ? el[propName] : "") || "";
+                }
+            ),
+            // خاصية CSS من style للعنصر الفرعي (مثل backgroundImage) بأمان
+            style: compileOptionalChaining(
+                ['root', 'selector', 'styleProp'],
+                'return root?.querySelector(selector)?.style?.[styleProp] || "";',
+                function(root, selector, styleProp) {
+                    const el = root && root.querySelector ? root.querySelector(selector) : null;
+                    return (el && el.style ? el.style[styleProp] : "") || "";
+                }
+            ),
+            // خاصية متداخلة اختيارية بأمان (مثل content?.cmd)
+            get: compileOptionalChaining(
+                ['obj', 'key'],
+                'return obj?.[key];',
+                function(obj, key) {
+                    return obj ? obj[key] : undefined;
+                }
+            ),
+            // استدعاء دالة اختيارية متداخلة بأمان (مثل window.cpShowProfile?.show(...))
+            call: compileOptionalChaining(
+                ['obj', 'method'],
+                'return obj?.[method] ? obj[method].apply(obj, Array.prototype.slice.call(arguments, 2)) : undefined;',
+                function(obj, method) {
+                    const fn = obj ? obj[method] : undefined;
+                    return (typeof fn === 'function') ? fn.apply(obj, Array.prototype.slice.call(arguments, 2)) : undefined;
+                }
+            )
+        };
 
     // أداة تنفيذ سلسلة المحاولات الاحتياطية: تُجرّب كل دالة بالترتيب حتى تُبلغ إحداها عن نجاح فعلي.
     function runFallbackChain(stageName, attempts) {
@@ -64,9 +164,9 @@ javascript: (function() {
     // ============================================================
     // 2) حاوية التنبيهات ونظام العرض (toast)
     // ============================================================
-    if (!document.getElementById("mobile-toast-container")) {
+    if (!document.getElementById("sp-jw-alert-stack")) {
         const container = document.createElement("div");
-        container.id = "mobile-toast-container";
+        container.id = "sp-jw-alert-stack";
         container.style = "position:fixed;top:15px;left:50%;transform:translateX(-50%);z-index:99999;max-width:320px;text-align:center";
         document.body.appendChild(container);
     }
@@ -89,7 +189,7 @@ javascript: (function() {
           </div>
           <div style="margin-top:10px;padding:8px;background:#e0e0e0;border-radius:6px;text-align:center;font-weight:bold">دخل مخفي للروم</div>
         `;
-        document.getElementById("mobile-toast-container").appendChild(toast);
+        document.getElementById("sp-jw-alert-stack").appendChild(toast);
     }
 
     // ============================================================
@@ -104,12 +204,12 @@ javascript: (function() {
         ].join(",");
 
         document.querySelectorAll(hiddenSelector).forEach(el => {
-            el.setAttribute('data-was-hidden', '1');
+            el.setAttribute('data-sp-jw-revealed', '1');
             // اسم بديل مستخدم في النسخة المشفرة المحفوظة للتوافق مع نفس العناصر.
             el.setAttribute('data-my-hidden', '1');
         });
 
-        const targets = document.querySelectorAll("[data-was-hidden='1'], [data-my-hidden='1']");
+        const targets = document.querySelectorAll("[data-sp-jw-revealed='1'], [data-my-hidden='1']");
         if (targets.length === 0) return;
 
         targets.forEach(el => {
@@ -261,7 +361,7 @@ javascript: (function() {
                 const uidClass = [...userEl.classList].find(c => c.startsWith('uid'));
                 if (uidClass && !alertedUsers.has(uidClass)) {
                     alertedUsers.add(uidClass);
-                    const name = userEl.getAttribute("n")?.trim() || "بدون اسم";
+                    const name = oc.attr(userEl, "n") || "بدون اسم";
 
                     let pic = "pic/unknown.png";
                     const picDiv = userEl.querySelector('.u-pic');
@@ -272,9 +372,9 @@ javascript: (function() {
                             pic = match[1].startsWith('http') ? match[1] : window.location.origin + '/' + match[1].replace(/^\/+/, '');
                         }
                     }
-
-                    const icon = userEl.querySelector('.u-ico')?.src || "";
-                    const hash = userEl.querySelector('.uhash')?.textContent || "";
+                    
+                    const icon = oc.prop(userEl, '.u-ico', 'src');
+                    const hash = oc.prop(userEl, '.uhash', 'textContent');
                     showAlert({
                         name,
                         pic,
@@ -388,12 +488,12 @@ javascript: (function() {
     //    (إضافة جديدة: تعرض بروفايل العضو مع صورته، رسالته، غرفته الحالية،
     //    وأزرار محادثة/تنبيه/إعجاب عبر sendSocketPayload)
     // ============================================================
-    (function setupProfileModalSystem() {
+    function setupProfileModalSystem() {
 
         function showToast(t, e = 3000) {
-            if (!document.getElementById("mobile-toast-container")) {
+            if (!document.getElementById("sp-jw-alert-stack")) {
                 const c = document.createElement("div");
-                c.id = "mobile-toast-container";
+                c.id = "sp-jw-alert-stack";
                 c.style = "position:fixed;top:15px;left:50%;transform:translateX(-50%);z-index:99999;max-width:320px;text-align:center";
                 document.body.appendChild(c);
             }
@@ -401,7 +501,7 @@ javascript: (function() {
             o.textContent = t;
             o.style = "background:#333;color:#fff;padding:8px 12px;margin-top:8px;border-radius:8px;cursor:pointer;font-size:13px;display:inline-block;box-shadow:0 2px 6px rgba(0,0,0,.3)";
             o.onclick = () => o.remove();
-            document.getElementById("mobile-toast-container").appendChild(o);
+            document.getElementById("sp-jw-alert-stack").appendChild(o);
             e > 0 && setTimeout(() => o.remove(), e);
         }
 
@@ -434,11 +534,11 @@ javascript: (function() {
                     if (typeof data === "string" && data.startsWith("42")) {
                         const payload = JSON.parse(data.slice(2));
                         const [eventName, content] = payload;
-                        if (eventName === "msg" && content?.cmd === "wr" && Array.isArray(content.data)) {
+                        if (eventName === "msg" && oc.get(content, 'cmd') === "wr" && Array.isArray(content.data)) {
                             const [userId, roomId] = content.data;
                             userRoomMap[userId] = roomId;
                             const roomEl = document.querySelector(`.room.r${roomId}`);
-                            const roomName = roomEl?.querySelector(".u-topic")?.textContent?.trim();
+                            const roomName = oc.text(roomEl, ".u-topic") || undefined;
                             if (roomName) roomNames[roomId] = roomName;
                         }
                     }
@@ -552,7 +652,7 @@ javascript: (function() {
                 target.username = name || "";
 
                 const card = document.querySelector(".uid" + id);
-                const topic = card?.querySelector(".u-topic")?.textContent?.trim() || name || id;
+                const topic = oc.text(card, ".u-topic") || name || id;
                 userNameSpan.textContent = topic;
 
                 // 🟢 اسم الغرفة + صورة الغرفة (بناء عبر DOM APIs بدل innerHTML لتفادي XSS)
@@ -561,7 +661,8 @@ javascript: (function() {
                 roomBox.textContent = "";
                 if (roomId) {
                     const roomEl = document.querySelector(".room.r" + roomId);
-                    const roomImg = roomEl?.querySelector(".u-pic")?.style?.backgroundImage?.replace(/^url\(["']?|["']?\)$/g, "")?.trim() || "";
+                    const roomBgRaw = oc.style(roomEl, ".u-pic", "backgroundImage");
+                    const roomImg = roomBgRaw.replace(/^url\(["']?|["']?\)$/g, "").trim();
 
                     const roomDiv = document.createElement("div");
                     roomDiv.addEventListener("click", function() {
@@ -581,16 +682,16 @@ javascript: (function() {
                     roomBox.appendChild(emptyDiv);
                 }
 
-                const ico = card?.querySelector(".u-ico")?.src || "";
+                const ico = oc.prop(card, ".u-ico", "src");
                 if (ico) bannerEl.src = ico; else bannerEl.removeAttribute("src");
-                const smallIco = card?.querySelector(".u-ico-small")?.src || "";
+                const smallIco = oc.prop(card, ".u-ico-small", "src");
                 if (smallIco) icoEl.src = smallIco; else icoEl.removeAttribute("src");
 
                 userPic.style.backgroundImage = bgImg ? `url(${bgImg})` : "none";
                 const innerPic = modal.querySelector("#cp-user-pic-inner");
                 if (innerPic) innerPic.style.backgroundImage = bgImg ? `url(${bgImg})` : "none";
 
-                const msg = card?.querySelector(".u-msg")?.textContent?.trim() || "";
+                const msg = oc.text(card, ".u-msg");
                 roomMsg.textContent = msg;
 
                 input.value = "";
@@ -651,7 +752,7 @@ javascript: (function() {
 
             window.cpShowProfile = { show, hide };
         }
-    })();
+    }
 
     // ============================================================
     // 9) تفعيل فتح نافذة البروفايل عند الضغط على مستخدمين بحالة مخفية (s4.png)
@@ -668,14 +769,18 @@ javascript: (function() {
                     el.style.cursor = "pointer";
                     el.onclick = function() {
                         const id = uid.replace("uid", "");
-                        const topic = el.querySelector(".u-topic")?.textContent?.trim() || "";
-                        const picDiv = el.querySelector(".u-pic");
-                        const rawBg = picDiv?.style.backgroundImage || "";
+                        const topic = oc.text(el, ".u-topic");
+                        const rawBg = oc.style(el, ".u-pic", "backgroundImage");
                         const bgImg = rawBg.replace(/^url\(["']?|["']?\)$/g, "").trim()
                             .replace(/\.png\.png$/, ".png")
                             .replace(/\.jpg\.png$/, ".jpg")
                             .replace(/\.jpeg\.png$/, ".jpeg");
-                        window.cpShowProfile?.show ? window.cpShowProfile.show(id, topic, bgImg) : alert("نافذة شو بروفايل غير مفعّلة بعد");
+                        const profileShow = oc.get(window.cpShowProfile, "show");
+                        if (profileShow) {
+                            profileShow.call(window.cpShowProfile, id, topic, bgImg);
+                        } else {
+                            alert("نافذة شو بروفايل غير مفعّلة بعد");
+                        }
                     };
                 }
             } catch (e) {}
@@ -720,10 +825,9 @@ javascript: (function() {
     // ============================================================
     // 11) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
     // ============================================================
-    new MutationObserver(() => {
-        const searchBox = document.getElementById('usearch');
-        if (searchBox && searchBox.value.trim().length > 0) return;
+    var jawalObserver = null;
 
+    function runAllStages() {
         showUsers();
         showAllHigherRanksOnlyHidden();
         fixHiddenFrames();
@@ -731,25 +835,89 @@ javascript: (function() {
         enablePrivateChatOnS4();
         enableProfileModalOnS4();
         enableMemberModalControls();
-    }).observe(document.body, {
-        childList: true,
-        subtree: true
-    });
+    }
 
-    // تشغيل أولي
-    showUsers();
-    showAllHigherRanksOnlyHidden();
-    fixHiddenFrames();
-    checkHiddenUsers();
-    enablePrivateChatOnS4();
-    enableProfileModalOnS4();
-    enableMemberModalControls();
+    function init() {
+        // إنشاء نافذة البروفايل الحديثة مرة واحدة فقط عند تفعيل هذه الوحدة تحديداً
+        try {
+            setupProfileModalSystem();
+        } catch (e) {
+            console.warn('⚠️ فشل تهيئة نظام نافذة البروفايل:', e);
+        }
 
-    console.log("✅ تم التفعيل: إظهار الأزرار + المخفيين + إصلاح جميع الإطارات والألوان (بما فيها ahmed + mhmood) + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png + نافذة البروفايل الحديثة + تتبع الغرف [دمج V1+V3 بسلسلة احتياطية + إضافات جديدة]");
+        if (typeof MutationObserver === 'function' && !jawalObserver) {
+            jawalObserver = new MutationObserver(function() {
+                const searchBox = document.getElementById('usearch');
+                if (searchBox && searchBox.value.trim().length > 0) return;
+                runAllStages();
+            });
+            jawalObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
 
-    // استخراج ID عضو معيّن واعتراض WebSocket الحقيقي (القسم 7): أداة تفاعلية تُظهر
-    // نافذة prompt() لذلك لا تُستدعى تلقائياً هنا (لتفادي حظر الصفحة بها في كل تفعيل
-    // للسكربت أو عند كل تشغيل لـ MutationObserver). تبقى متاحة للاستدعاء اليدوي
-    // عند الحاجة عبر console: extractIdAndInterceptSocket()
-    window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
+        // تشغيل أولي
+        runAllStages();
+
+        console.log("✅ تم التفعيل [Jawal Host]: إظهار الأزرار + المخفيين + إصلاح جميع الإطارات والألوان (بما فيها ahmed + mhmood) + تنبيه + فتح الخاص عند الضغط على أصحاب s4.png + نافذة البروفايل الحديثة + تتبع الغرف [دمج V1+V3 بسلسلة احتياطية + إضافات جديدة]");
+
+        // استخراج ID عضو معيّن واعتراض WebSocket الحقيقي (القسم 7): أداة تفاعلية تُظهر
+        // نافذة prompt() لذلك لا تُستدعى تلقائياً هنا (لتفادي حظر الصفحة بها في كل تفعيل
+        // للسكربت أو عند كل تشغيل لـ MutationObserver). تبقى متاحة للاستدعاء اليدوي
+        // عند الحاجة عبر console: extractIdAndInterceptSocket()
+        window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
+    }
+
+    return { name: 'شات جوال هوست (Jawal Host)', detect: detect, init: init };
+    })();
+
+    // ============================================================
+    // وحدات محجوزة (Stubs) لبقية النسخ — بانتظار رفع ملفات كل نسخة لتحليلها
+    // (شات هايبر هوست، شات تايقر هوست، شات يوكام هوست، شات فون هوست)
+    // كل وحدة detect() ترجع false حالياً حتى لا تتعارض مع جوال هوست أو تعمل خطأً على نسخة غير مدعومة بعد.
+    // بمجرد رفع ملفات إحدى هذه النسخ في samples/<host>، تُحلَّل وتُبنى detect()/init() الخاصة بها هنا
+    // دون أي تعديل على وحدة جوال هوست أعلاه.
+    // ============================================================
+    function makePendingHostModule(hostName) {
+        return {
+            name: hostName,
+            detect: function() { return false; },
+            init: function() {
+                console.log('⏳ [' + hostName + '] لم يتم رفع ورصد ملفات هذه النسخة بعد لبناء منطقها.');
+            }
+        };
+    }
+    ScriptPro.hosts.tiger = makePendingHostModule('شات تايقر هوست (Tiger Host)');
+    ScriptPro.hosts.foon = makePendingHostModule('شات فون هوست (Foon Host)');
+    ScriptPro.hosts.ucam = makePendingHostModule('شات يوكام هوست (Ucam Host)');
+    ScriptPro.hosts.hyper = makePendingHostModule('شات هايبر هوست (Hyper Host)');
+
+    // ============================================================
+    // نقطة الدخول: تعرّف تلقائي على نسخة الشات الحالية، ثم تفعيل وحدتها فقط
+    // ترتيب الفحص: جوال هوست (مكتملة) ثم البقية (محجوزة حالياً)
+    // ============================================================
+    function detectAndActivate() {
+        var order = ['jawal', 'tiger', 'foon', 'ucam', 'hyper'];
+        for (var i = 0; i < order.length; i++) {
+            var key = order[i];
+            var host = ScriptPro.hosts[key];
+            if (!host || typeof host.detect !== 'function') continue;
+            try {
+                if (host.detect()) {
+                    ScriptPro.activeHost = key;
+                    console.log('🔎 تم التعرف على النسخة: ' + host.name);
+                    host.init();
+                    return true;
+                }
+            } catch (e) {
+                console.warn('⚠️ فشل فحص/تفعيل وحدة "' + (host && host.name) + '":', e);
+            }
+        }
+        console.warn('⚠️ لم يتم التعرف على أي نسخة مدعومة حالياً على هذه الصفحة.');
+        return false;
+    }
+
+    window.ScriptPro = ScriptPro;
+    detectAndActivate();
 })();
