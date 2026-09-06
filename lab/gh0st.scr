@@ -440,7 +440,9 @@ javascript: (function() {
                             if (roomName) roomNames[roomId] = roomName;
                         }
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.debug("⚠ تعذّر تحليل رسالة WebSocket لتتبع الغرف:", e);
+                }
             });
         }
 
