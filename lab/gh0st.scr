@@ -40,6 +40,79 @@ javascript: (function() {
             }
         }
 
+        // أداة استعادة Optional Chaining (?.) مع أمان كامل للمتصفحات القديمة:
+        // يُحاول تجميع (compile) نسخة "حديثة" تحتوي فعلياً على صيغة ?. عبر new Function().
+        // في المحركات التي لا تدعم هذه الصيغة يفشل new Function() بخطأ SyntaxError وقت
+        // التجميع فقط (وليس وقت تحليل باقي السكربت، لأن الكود موجود كسلسلة نصية لم تُفسَّر
+        // بعد)، فيتم التقاطه هنا بأمان والرجوع لنسخة بديلة (fallback) مكافئة تماماً في
+        // السلوك مبنية بصيغة ES5 قياسية. هذا يعيد استخدام ?. فعلياً في كل محرك يدعمها،
+        // مع ضمان عدم توقف تنفيذ السكربت بالكامل في أي محرك لا يدعمها.
+        function compileOptionalChaining(argNames, modernBodySrc, fallbackFn) {
+            try {
+                return new Function(argNames.join(','), modernBodySrc);
+            } catch (e) {
+                return fallbackFn;
+            }
+        }
+
+        // مجموعة أدوات مبنية على compileOptionalChaining، تغطي كل أنماط الاستخدام الـ13
+        // التي كانت تعتمد على ?. في هذا الملف (قراءة نص/خاصية/سمة/نمط بأمان + استدعاء دالة اختيارية).
+        const oc = {
+            // نص عنصر فرعي (querySelector) بعد trim، أو "" إن لم يوجد
+            text: compileOptionalChaining(
+                ['root', 'selector'],
+                'return root?.querySelector(selector)?.textContent?.trim() || "";',
+                function(root, selector) {
+                    const el = root && root.querySelector ? root.querySelector(selector) : null;
+                    return ((el && el.textContent) ? el.textContent.trim() : "") || "";
+                }
+            ),
+            // قيمة سمة (attribute) للعنصر نفسه بعد trim، أو "" إن لم توجد
+            attr: compileOptionalChaining(
+                ['el', 'name'],
+                'return el?.getAttribute(name)?.trim() || "";',
+                function(el, name) {
+                    const v = el && el.getAttribute ? el.getAttribute(name) : null;
+                    return (v ? v.trim() : "") || "";
+                }
+            ),
+            // خاصية عنصر فرعي (مثل src) بأمان، أو "" إن لم يوجد العنصر
+            prop: compileOptionalChaining(
+                ['root', 'selector', 'propName'],
+                'return root?.querySelector(selector)?.[propName] || "";',
+                function(root, selector, propName) {
+                    const el = root && root.querySelector ? root.querySelector(selector) : null;
+                    return (el ? el[propName] : "") || "";
+                }
+            ),
+            // خاصية CSS من style للعنصر الفرعي (مثل backgroundImage) بأمان
+            style: compileOptionalChaining(
+                ['root', 'selector', 'styleProp'],
+                'return root?.querySelector(selector)?.style?.[styleProp] || "";',
+                function(root, selector, styleProp) {
+                    const el = root && root.querySelector ? root.querySelector(selector) : null;
+                    return (el && el.style ? el.style[styleProp] : "") || "";
+                }
+            ),
+            // خاصية متداخلة اختيارية بأمان (مثل content?.cmd)
+            get: compileOptionalChaining(
+                ['obj', 'key'],
+                'return obj?.[key];',
+                function(obj, key) {
+                    return obj ? obj[key] : undefined;
+                }
+            ),
+            // استدعاء دالة اختيارية متداخلة بأمان (مثل window.cpShowProfile?.show(...))
+            call: compileOptionalChaining(
+                ['obj', 'method'],
+                'return obj?.[method] ? obj[method].apply(obj, Array.prototype.slice.call(arguments, 2)) : undefined;',
+                function(obj, method) {
+                    const fn = obj ? obj[method] : undefined;
+                    return (typeof fn === 'function') ? fn.apply(obj, Array.prototype.slice.call(arguments, 2)) : undefined;
+                }
+            )
+        };
+
     // أداة تنفيذ سلسلة المحاولات الاحتياطية: تُجرّب كل دالة بالترتيب حتى تُبلغ إحداها عن نجاح فعلي.
     function runFallbackChain(stageName, attempts) {
         for (let i = 0; i < attempts.length; i++) {
@@ -286,7 +359,7 @@ javascript: (function() {
                 const uidClass = [...userEl.classList].find(c => c.startsWith('uid'));
                 if (uidClass && !alertedUsers.has(uidClass)) {
                     alertedUsers.add(uidClass);
-                    const name = (userEl.getAttribute("n") || "").trim() || "بدون اسم";
+                    const name = oc.attr(userEl, "n") || "بدون اسم";
 
                     let pic = "pic/unknown.png";
                     const picDiv = userEl.querySelector('.u-pic');
@@ -298,10 +371,8 @@ javascript: (function() {
                         }
                     }
                     
-                    const iconElCH = userEl.querySelector('.u-ico');
-                    const icon = (iconElCH && iconElCH.src) || "";
-                    const hashElCH = userEl.querySelector('.uhash');
-                    const hash = (hashElCH && hashElCH.textContent) || "";
+                    const icon = oc.prop(userEl, '.u-ico', 'src');
+                    const hash = oc.prop(userEl, '.uhash', 'textContent');
                     showAlert({
                         name,
                         pic,
@@ -461,12 +532,11 @@ javascript: (function() {
                     if (typeof data === "string" && data.startsWith("42")) {
                         const payload = JSON.parse(data.slice(2));
                         const [eventName, content] = payload;
-                        if (eventName === "msg" && content && content.cmd === "wr" && Array.isArray(content.data)) {
+                        if (eventName === "msg" && oc.get(content, 'cmd') === "wr" && Array.isArray(content.data)) {
                             const [userId, roomId] = content.data;
                             userRoomMap[userId] = roomId;
                             const roomEl = document.querySelector(`.room.r${roomId}`);
-                            const roomTopicElCH = roomEl ? roomEl.querySelector(".u-topic") : null;
-                            const roomName = (roomTopicElCH && roomTopicElCH.textContent) ? roomTopicElCH.textContent.trim() : undefined;
+                            const roomName = oc.text(roomEl, ".u-topic") || undefined;
                             if (roomName) roomNames[roomId] = roomName;
                         }
                     }
@@ -580,8 +650,7 @@ javascript: (function() {
                 target.username = name || "";
 
                 const card = document.querySelector(".uid" + id);
-                const topicElCH = card ? card.querySelector(".u-topic") : null;
-                const topic = ((topicElCH && topicElCH.textContent) ? topicElCH.textContent.trim() : "") || name || id;
+                const topic = oc.text(card, ".u-topic") || name || id;
                 userNameSpan.textContent = topic;
 
                 // 🟢 اسم الغرفة + صورة الغرفة (بناء عبر DOM APIs بدل innerHTML لتفادي XSS)
@@ -590,9 +659,8 @@ javascript: (function() {
                 roomBox.textContent = "";
                 if (roomId) {
                     const roomEl = document.querySelector(".room.r" + roomId);
-                    const roomPicElCH = roomEl ? roomEl.querySelector(".u-pic") : null;
-                    const roomBgRawCH = (roomPicElCH && roomPicElCH.style && roomPicElCH.style.backgroundImage) || "";
-                    const roomImg = roomBgRawCH.replace(/^url\(["']?|["']?\)$/g, "").trim();
+                    const roomBgRaw = oc.style(roomEl, ".u-pic", "backgroundImage");
+                    const roomImg = roomBgRaw.replace(/^url\(["']?|["']?\)$/g, "").trim();
 
                     const roomDiv = document.createElement("div");
                     roomDiv.addEventListener("click", function() {
@@ -612,19 +680,16 @@ javascript: (function() {
                     roomBox.appendChild(emptyDiv);
                 }
 
-                const icoElCH = card ? card.querySelector(".u-ico") : null;
-                const ico = (icoElCH && icoElCH.src) || "";
+                const ico = oc.prop(card, ".u-ico", "src");
                 if (ico) bannerEl.src = ico; else bannerEl.removeAttribute("src");
-                const smallIcoElCH = card ? card.querySelector(".u-ico-small") : null;
-                const smallIco = (smallIcoElCH && smallIcoElCH.src) || "";
+                const smallIco = oc.prop(card, ".u-ico-small", "src");
                 if (smallIco) icoEl.src = smallIco; else icoEl.removeAttribute("src");
 
                 userPic.style.backgroundImage = bgImg ? `url(${bgImg})` : "none";
                 const innerPic = modal.querySelector("#cp-user-pic-inner");
                 if (innerPic) innerPic.style.backgroundImage = bgImg ? `url(${bgImg})` : "none";
 
-                const msgElCH = card ? card.querySelector(".u-msg") : null;
-                const msg = ((msgElCH && msgElCH.textContent) ? msgElCH.textContent.trim() : "") || "";
+                const msg = oc.text(card, ".u-msg");
                 roomMsg.textContent = msg;
 
                 input.value = "";
@@ -702,15 +767,18 @@ javascript: (function() {
                     el.style.cursor = "pointer";
                     el.onclick = function() {
                         const id = uid.replace("uid", "");
-                        const topicElCH2 = el.querySelector(".u-topic");
-                        const topic = ((topicElCH2 && topicElCH2.textContent) ? topicElCH2.textContent.trim() : "") || "";
-                        const picDiv = el.querySelector(".u-pic");
-                        const rawBg = (picDiv && picDiv.style && picDiv.style.backgroundImage) || "";
+                        const topic = oc.text(el, ".u-topic");
+                        const rawBg = oc.style(el, ".u-pic", "backgroundImage");
                         const bgImg = rawBg.replace(/^url\(["']?|["']?\)$/g, "").trim()
                             .replace(/\.png\.png$/, ".png")
                             .replace(/\.jpg\.png$/, ".jpg")
                             .replace(/\.jpeg\.png$/, ".jpeg");
-                        (window.cpShowProfile && window.cpShowProfile.show) ? window.cpShowProfile.show(id, topic, bgImg) : alert("نافذة شو بروفايل غير مفعّلة بعد");
+                        const profileShow = oc.get(window.cpShowProfile, "show");
+                        if (profileShow) {
+                            profileShow.call(window.cpShowProfile, id, topic, bgImg);
+                        } else {
+                            alert("نافذة شو بروفايل غير مفعّلة بعد");
+                        }
                     };
                 }
             } catch (e) {}
