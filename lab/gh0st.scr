@@ -32,9 +32,11 @@ javascript: (function() {
     ScriptPro.hosts.jawal = (function() {
         var jawalObserver = null;
         var jawalFlushTimer = null;
+        var jawalFlushStartedAt = 0;
         const JAWAL_DETECTION_THRESHOLD = 4;
         const JAWAL_WEIGHT_USERS = 1;
         const JAWAL_WEIGHT_USER_ITEM = 2;
+        const JAWAL_WEIGHT_MINOR_INDICATOR = 1;
         var jawalInitialized = false;
         var diagnostics = {
             enabled: false,
@@ -62,10 +64,10 @@ javascript: (function() {
                 var score = 0;
                 if (document.querySelector('#users')) score += JAWAL_WEIGHT_USERS;
                 if (document.querySelector('#users .uzr, .uzr.inroom')) score += JAWAL_WEIGHT_USER_ITEM;
-                if (document.querySelector('.u-pic')) score++;
-                if (document.querySelector('.u-topic')) score++;
-                if (document.querySelector('.uhash')) score++;
-                if (document.querySelector('img.ustat[src*="s4.png"]')) score++;
+                if (document.querySelector('.u-pic')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
+                if (document.querySelector('.u-topic')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
+                if (document.querySelector('.uhash')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
+                if (document.querySelector('img.ustat[src*="s4.png"]')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
                 return score >= JAWAL_DETECTION_THRESHOLD;
             } catch (e) {
                 recordDiagnostic('detect-error', 'jawal');
@@ -159,6 +161,7 @@ javascript: (function() {
                 var errorName = e && e.name ? e.name : 'Error';
                 var errorMessage = e && e.message ? String(e.message).slice(0, 120) : 'unknown';
                 recordDiagnostic('fallback-error', stageName + ':' + (i + 1) + ':' + errorName + ':' + errorMessage);
+                console.warn('ScriptPro fallback failed:', stageName, errorMessage);
             }
         }
         recordDiagnostic('fallback-empty', stageName);
@@ -895,6 +898,7 @@ javascript: (function() {
     // ============================================================
     // يمنح التحديثات المتتابعة مهلة قصيرة للتجمع قبل إعادة فحص الواجهة.
     const JAWAL_FLUSH_DELAY_MS = 50;
+    const JAWAL_MAX_FLUSH_DELAY_MS = 250;
     function runAllStages() {
         showUsers();
         showAllHigherRanksOnlyHidden();
@@ -906,9 +910,16 @@ javascript: (function() {
     }
 
     function scheduleRunAllStages() {
+        var now = Date.now();
+        if (jawalFlushTimer !== null && jawalFlushStartedAt &&
+            now - jawalFlushStartedAt >= JAWAL_MAX_FLUSH_DELAY_MS) {
+            return;
+        }
         if (jawalFlushTimer !== null) clearTimeout(jawalFlushTimer);
+        if (jawalFlushTimer === null) jawalFlushStartedAt = now;
         jawalFlushTimer = setTimeout(function() {
             jawalFlushTimer = null;
+            jawalFlushStartedAt = 0;
             runAllStages();
         }, JAWAL_FLUSH_DELAY_MS);
     }
@@ -937,6 +948,7 @@ javascript: (function() {
             clearTimeout(jawalFlushTimer);
             jawalFlushTimer = null;
         }
+        jawalFlushStartedAt = 0;
         alertedUsers.clear();
         diagnostics.events = [];
         disableDiagnostics();
