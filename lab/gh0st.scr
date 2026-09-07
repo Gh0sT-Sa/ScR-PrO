@@ -267,8 +267,11 @@ javascript: (function() {
     function safeImageUrl(value, fallback) {
         if (typeof value !== 'string' || value.length > 2048) return fallback;
         var url = value.trim();
-        if (/^(https?:\/\/|\/|[a-z0-9_.-]+\/)/i.test(url) &&
-            !/^(javascript|data|vbscript):/i.test(url)) {
+        if (url.indexOf('//') === 0 ||
+            (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^https?:\/\//i.test(url))) {
+            return fallback;
+        }
+        if (/^(https?:\/\/|\/|[a-z0-9_.-]+\/)/i.test(url)) {
             return url;
         }
         return fallback;
@@ -908,6 +911,8 @@ javascript: (function() {
     // 11) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
     // ============================================================
     // يمنح التحديثات المتتابعة مهلة قصيرة للتجمع قبل إعادة فحص الواجهة.
+    // 50ms يجمع التغييرات المتتابعة، و250ms حد أقصى حتى لا يتأخر
+    // تحديث الواجهة أثناء تدفق DOM مستمر.
     const JAWAL_FLUSH_DELAY_MS = 50;
     const JAWAL_MAX_FLUSH_DELAY_MS = 250;
     function runAllStages() {
@@ -1011,14 +1016,24 @@ javascript: (function() {
         // للسكربت أو عند كل تشغيل لـ MutationObserver). تبقى متاحة للاستدعاء اليدوي
         // عند الحاجة عبر console: extractIdAndInterceptSocket()
         window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
-        if (window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true) {
-            window.ScriptProJawalDiagnostics = {
-                enable: enableDiagnostics,
-                disable: disableDiagnostics,
-                getEvents: getDiagnostics,
-                destroy: destroy
-            };
-        }
+        window.ScriptProJawalDiagnostics = {
+            enable: function() {
+                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                    enableDiagnostics() : false;
+            },
+            disable: function() {
+                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                    disableDiagnostics() : false;
+            },
+            getEvents: function() {
+                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                    getDiagnostics() : [];
+            },
+            destroy: function() {
+                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                    destroy() : false;
+            }
+        };
     }
 
     return {
