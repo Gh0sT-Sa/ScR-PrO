@@ -35,9 +35,7 @@ javascript: (function() {
         var diagnostics = {
             enabled: false,
             events: [],
-            maxEvents: 200,
-            originalWebSocketSend: null,
-            websocketPatched: false
+            maxEvents: 200
         };
 
         function recordDiagnostic(type, detail) {
@@ -152,7 +150,9 @@ javascript: (function() {
                     return true;
                 }
             } catch (e) {
-                recordDiagnostic('fallback-error', stageName + ':' + (i + 1));
+                var errorName = e && e.name ? e.name : 'Error';
+                var errorMessage = e && e.message ? String(e.message).slice(0, 120) : 'unknown';
+                recordDiagnostic('fallback-error', stageName + ':' + (i + 1) + ':' + errorName + ':' + errorMessage);
             }
         }
         recordDiagnostic('fallback-empty', stageName);
@@ -904,40 +904,13 @@ javascript: (function() {
         }, 50);
     }
 
-    function patchWebSocketDiagnostics() {
-        if (!diagnostics.enabled || diagnostics.websocketPatched ||
-            !window.WebSocket || !WebSocket.prototype ||
-            typeof WebSocket.prototype.send !== 'function') return;
-        diagnostics.originalWebSocketSend = WebSocket.prototype.send;
-        WebSocket.prototype.send = function(data) {
-            var size = 0;
-            try {
-                size = typeof data === 'string' ? data.length :
-                    (data && typeof data.byteLength === 'number' ? data.byteLength : 0);
-            } catch (e) {}
-            recordDiagnostic('websocket-send', String(size));
-            return diagnostics.originalWebSocketSend.apply(this, arguments);
-        };
-        diagnostics.websocketPatched = true;
-    }
-
-    function restoreWebSocketDiagnostics() {
-        if (!diagnostics.websocketPatched || !window.WebSocket ||
-            !WebSocket.prototype) return;
-        WebSocket.prototype.send = diagnostics.originalWebSocketSend;
-        diagnostics.originalWebSocketSend = null;
-        diagnostics.websocketPatched = false;
-    }
-
     function enableDiagnostics() {
         diagnostics.enabled = true;
-        patchWebSocketDiagnostics();
-        recordDiagnostic('diagnostics-enabled', 'metadata-only');
+        recordDiagnostic('diagnostics-enabled', 'dom-and-local-state-metadata-only');
         return true;
     }
 
     function disableDiagnostics() {
-        restoreWebSocketDiagnostics();
         diagnostics.enabled = false;
         return true;
     }
@@ -955,7 +928,6 @@ javascript: (function() {
             clearTimeout(jawalFlushTimer);
             jawalFlushTimer = null;
         }
-        restoreWebSocketDiagnostics();
         alertedUsers.clear();
         disableDiagnostics();
         if (window.ScriptPro && window.ScriptPro.activeHost === 'jawal') {
@@ -995,12 +967,14 @@ javascript: (function() {
         // للسكربت أو عند كل تشغيل لـ MutationObserver). تبقى متاحة للاستدعاء اليدوي
         // عند الحاجة عبر console: extractIdAndInterceptSocket()
         window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
-        window.ScriptProJawalDiagnostics = {
-            enable: enableDiagnostics,
-            disable: disableDiagnostics,
-            getEvents: getDiagnostics,
-            destroy: destroy
-        };
+        if (window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true) {
+            window.ScriptProJawalDiagnostics = {
+                enable: enableDiagnostics,
+                disable: disableDiagnostics,
+                getEvents: getDiagnostics,
+                destroy: destroy
+            };
+        }
     }
 
     return {
