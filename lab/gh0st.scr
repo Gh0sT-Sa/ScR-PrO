@@ -33,6 +33,7 @@ javascript: (function() {
         var jawalObserver = null;
         var jawalFlushTimer = null;
         var jawalFlushStartedAt = 0;
+        // الحد 4 يعني المؤشر القوي + مؤشرين داعمين، من أصل 7 نقاط ممكنة.
         const JAWAL_DETECTION_THRESHOLD = 4;
         const JAWAL_WEIGHT_USERS = 1;
         const JAWAL_WEIGHT_USER_ITEM = 2;
@@ -268,10 +269,18 @@ javascript: (function() {
         if (typeof value !== 'string' || value.length > 2048) return fallback;
         var url = value.trim();
         if (url.indexOf('//') === 0 ||
-            (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^https?:\/\//i.test(url))) {
+            /^[a-z][a-z0-9+.-]*:/i.test(url)) {
             return fallback;
         }
         if (/^(https?:\/\/|\/|[a-z0-9_.-]+\/)/i.test(url)) {
+            if (/^https?:\/\//i.test(url) && typeof URL === 'function') {
+                try {
+                    var parsed = new URL(url);
+                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return fallback;
+                } catch (e) {
+                    return fallback;
+                }
+            }
             return url;
         }
         return fallback;
@@ -926,6 +935,7 @@ javascript: (function() {
     }
 
     function scheduleRunAllStages() {
+        // Debounce changes for 50ms, but force a flush after 250ms of churn.
         var now = Date.now();
         if (jawalFlushTimer !== null && jawalFlushStartedAt &&
             now - jawalFlushStartedAt >= JAWAL_MAX_FLUSH_DELAY_MS) {
@@ -1016,21 +1026,25 @@ javascript: (function() {
         // للسكربت أو عند كل تشغيل لـ MutationObserver). تبقى متاحة للاستدعاء اليدوي
         // عند الحاجة عبر console: extractIdAndInterceptSocket()
         window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
+        function isDiagnosticsAllowed() {
+            return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true;
+        }
+
         window.ScriptProJawalDiagnostics = {
             enable: function() {
-                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                return isDiagnosticsAllowed() ?
                     enableDiagnostics() : false;
             },
             disable: function() {
-                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                return isDiagnosticsAllowed() ?
                     disableDiagnostics() : false;
             },
             getEvents: function() {
-                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                return isDiagnosticsAllowed() ?
                     getDiagnostics() : [];
             },
             destroy: function() {
-                return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true ?
+                return isDiagnosticsAllowed() ?
                     destroy() : false;
             }
         };
