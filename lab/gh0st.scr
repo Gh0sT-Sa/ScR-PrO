@@ -32,6 +32,7 @@ javascript: (function() {
     ScriptPro.hosts.jawal = (function() {
         var jawalObserver = null;
         var jawalFlushTimer = null;
+        const JAWAL_DETECTION_THRESHOLD = 4;
         var diagnostics = {
             enabled: false,
             events: [],
@@ -54,7 +55,7 @@ javascript: (function() {
         function detect() {
             try {
                 // .uzr داخل #users هو المؤشر الأقوى (وزنه 2)، وتحتاج الوحدة
-                // إلى مؤشرين داعمين على الأقل قبل التفعيل (الحد الأدنى 4).
+                // إلى مؤشرين داعمين على الأقل قبل التفعيل.
                 var score = 0;
                 if (document.querySelector('#users')) score++;
                 if (document.querySelector('#users .uzr, .uzr.inroom')) score += 2;
@@ -62,7 +63,7 @@ javascript: (function() {
                 if (document.querySelector('.u-topic')) score++;
                 if (document.querySelector('.uhash')) score++;
                 if (document.querySelector('img.ustat[src*="s4.png"]')) score++;
-                return score >= 4;
+                return score >= JAWAL_DETECTION_THRESHOLD;
             } catch (e) {
                 recordDiagnostic('detect-error', 'jawal');
                 return false;
@@ -901,7 +902,7 @@ javascript: (function() {
     }
 
     function scheduleRunAllStages() {
-        if (jawalFlushTimer !== null) return;
+        if (jawalFlushTimer !== null) clearTimeout(jawalFlushTimer);
         jawalFlushTimer = setTimeout(function() {
             jawalFlushTimer = null;
             runAllStages();
@@ -948,10 +949,12 @@ javascript: (function() {
         }
 
         if (typeof MutationObserver === 'function' && !jawalObserver) {
-            jawalObserver = new MutationObserver(function() {
+            jawalObserver = new MutationObserver(function(records) {
                 const searchBox = document.getElementById('usearch');
                 if (searchBox && searchBox.value.trim().length > 0) return;
-                recordDiagnostic('dom-change', 'body');
+                var firstTarget = records && records[0] && records[0].target;
+                var targetName = firstTarget && firstTarget.nodeName ? firstTarget.nodeName : 'body';
+                recordDiagnostic('dom-change', String(records ? records.length : 0) + ':' + targetName);
                 scheduleRunAllStages();
             });
             // تُراقب body لأن نافذة البروفايل والتنبيهات قد تكون خارج #users.
