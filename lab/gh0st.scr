@@ -53,6 +53,8 @@ javascript: (function() {
         // كشف نسخة جوال هوست بمؤشرات متعددة لتجنب تشغيل الوحدة على نسخة أخرى.
         function detect() {
             try {
+                // .uzr داخل #users هو المؤشر الأقوى (وزنه 2)، وتحتاج الوحدة
+                // إلى مؤشرين داعمين على الأقل قبل التفعيل (الحد الأدنى 4).
                 var score = 0;
                 if (document.querySelector('#users')) score++;
                 if (document.querySelector('#users .uzr, .uzr.inroom')) score += 2;
@@ -886,6 +888,8 @@ javascript: (function() {
     // ============================================================
     // 11) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
     // ============================================================
+    // يمنح التحديثات المتتابعة مهلة قصيرة للتجمع قبل إعادة فحص الواجهة.
+    const JAWAL_FLUSH_DELAY_MS = 50;
     function runAllStages() {
         showUsers();
         showAllHigherRanksOnlyHidden();
@@ -901,7 +905,7 @@ javascript: (function() {
         jawalFlushTimer = setTimeout(function() {
             jawalFlushTimer = null;
             runAllStages();
-        }, 50);
+        }, JAWAL_FLUSH_DELAY_MS);
     }
 
     function enableDiagnostics() {
@@ -950,8 +954,8 @@ javascript: (function() {
                 recordDiagnostic('dom-change', 'body');
                 scheduleRunAllStages();
             });
-            var observedRoot = document.getElementById('users') || document.body;
-            jawalObserver.observe(observedRoot, {
+            // تُراقب body لأن نافذة البروفايل والتنبيهات قد تكون خارج #users.
+            jawalObserver.observe(document.body, {
                 childList: true,
                 subtree: true
             });
