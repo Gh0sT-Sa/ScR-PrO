@@ -226,13 +226,14 @@ javascript: (function() {
         const row = document.createElement("div");
         row.style = "display:flex;align-items:center;gap:8px";
         const pic = document.createElement("img");
-        pic.src = user.pic || "pic/unknown.png";
+        pic.src = safeImageUrl(user.pic, "pic/unknown.png");
         pic.alt = "";
         pic.style = "width:32px;height:32px;border-radius:50%;border:1px solid #ccc";
         row.appendChild(pic);
-        if (user.icon) {
+        const iconUrl = safeImageUrl(user.icon, "");
+        if (iconUrl) {
             const icon = document.createElement("img");
-            icon.src = user.icon;
+            icon.src = iconUrl;
             icon.alt = "";
             icon.style = "width:16px;height:16px";
             row.appendChild(icon);
@@ -261,6 +262,16 @@ javascript: (function() {
         }
         container.appendChild(toast);
         recordDiagnostic('hidden-user-alert', 'shown');
+    }
+
+    function safeImageUrl(value, fallback) {
+        if (typeof value !== 'string' || value.length > 2048) return fallback;
+        var url = value.trim();
+        if (/^(https?:\/\/|\/|[a-z0-9_.-]+\/)/i.test(url) &&
+            !/^(javascript|data|vbscript):/i.test(url)) {
+            return url;
+        }
+        return fallback;
     }
 
     // ============================================================
@@ -913,6 +924,10 @@ javascript: (function() {
         var now = Date.now();
         if (jawalFlushTimer !== null && jawalFlushStartedAt &&
             now - jawalFlushStartedAt >= JAWAL_MAX_FLUSH_DELAY_MS) {
+            clearTimeout(jawalFlushTimer);
+            jawalFlushTimer = null;
+            jawalFlushStartedAt = 0;
+            runAllStages();
             return;
         }
         if (jawalFlushTimer !== null) clearTimeout(jawalFlushTimer);
