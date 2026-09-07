@@ -33,7 +33,8 @@ javascript: (function() {
         var jawalObserver = null;
         var jawalFlushTimer = null;
         var jawalFlushStartedAt = 0;
-        // الحد 4 يعني المؤشر القوي + مؤشرين داعمين، من أصل 7 نقاط ممكنة.
+        // #users وزن أساسي 1، ووجود عنصر المستخدم داخلها وزن قوي 2.
+        // المؤشرات الأربعة الباقية وزنها 1؛ الحد 4 يتطلب بنية مستخدم قوية.
         const JAWAL_DETECTION_THRESHOLD = 4;
         const JAWAL_WEIGHT_USERS = 1;
         const JAWAL_WEIGHT_USER_ITEM = 2;
@@ -269,7 +270,7 @@ javascript: (function() {
         if (typeof value !== 'string' || value.length > 2048) return fallback;
         var url = value.trim();
         if (url.indexOf('//') === 0 ||
-            /^[a-z][a-z0-9+.-]*:/i.test(url)) {
+            (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^https?:\/\//i.test(url))) {
             return fallback;
         }
         if (/^(https?:\/\/|\/|[a-z0-9_.-]+\/)/i.test(url)) {
