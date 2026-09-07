@@ -249,6 +249,7 @@ javascript: (function() {
         toast.appendChild(row);
         toast.appendChild(message);
         const container = document.getElementById("sp-jw-alert-stack");
+        if (!container) return;
         while (container.children.length >= maxVisibleAlerts) {
             container.removeChild(container.firstChild);
         }
@@ -952,9 +953,11 @@ javascript: (function() {
             jawalObserver = new MutationObserver(function(records) {
                 const searchBox = document.getElementById('usearch');
                 if (searchBox && searchBox.value.trim().length > 0) return;
-                var firstTarget = records && records[0] && records[0].target;
-                var targetName = firstTarget && firstTarget.nodeName ? firstTarget.nodeName : 'body';
-                recordDiagnostic('dom-change', String(records ? records.length : 0) + ':' + targetName);
+                if (diagnostics.enabled) {
+                    var firstTarget = records && records[0] && records[0].target;
+                    var targetName = firstTarget && firstTarget.nodeName ? firstTarget.nodeName : 'body';
+                    recordDiagnostic('dom-change', String(records ? records.length : 0) + ':' + targetName);
+                }
                 scheduleRunAllStages();
             });
             // تُراقب body لأن نافذة البروفايل والتنبيهات قد تكون خارج #users.
