@@ -30,12 +30,49 @@ javascript: (function() {
     // وحدة: شات جوال هوست (Jawal Host) — تجميع كل منطق §1..§9 الحالي داخل وحدة مستقلة
     // ============================================================
     ScriptPro.hosts.jawal = (function() {
-        // كشف نسخة جوال هوست: عناصر .uzr داخل حاوية #users هي البنية المميزة لهذه النسخة
-        // (مؤكدة من ملفات samples/Jawal-host مثل shbl50000.js وshbl3-m.js وstr-shbl.js).
+        var jawalObserver = null;
+        var jawalFlushTimer = null;
+        var jawalFlushStartedAt = 0;
+        // #users وزن أساسي 1، ووجود عنصر المستخدم داخلها وزن قوي 2.
+        // المؤشرات الأربعة الباقية وزنها 1؛ الحد 4 يتطلب بنية مستخدم قوية.
+        const JAWAL_DETECTION_THRESHOLD = 4;
+        const JAWAL_WEIGHT_USERS = 1;
+        const JAWAL_WEIGHT_USER_ITEM = 2;
+        const JAWAL_WEIGHT_MINOR_INDICATOR = 1;
+        var jawalInitialized = false;
+        var diagnostics = {
+            enabled: false,
+            events: [],
+            maxEvents: 200
+        };
+
+        function recordDiagnostic(type, detail) {
+            if (!diagnostics.enabled) return;
+            diagnostics.events.push({
+                time: new Date().toISOString(),
+                type: type,
+                detail: detail || ''
+            });
+            if (diagnostics.events.length > diagnostics.maxEvents) {
+                diagnostics.events.shift();
+            }
+        }
+
+        // كشف نسخة جوال هوست بمؤشرات متعددة لتجنب تشغيل الوحدة على نسخة أخرى.
         function detect() {
             try {
-                return !!(document.querySelector('#users .uzr') || document.querySelector('.uzr.inroom'));
+                // أقصى مجموع 7: وجود .uzr داخل #users (وزنه 2) مع مؤشرين
+                // داعمين يكفي للتفعيل، بينما المؤشرات الضعيفة وحدها لا تكفي.
+                var score = 0;
+                if (document.querySelector('#users')) score += JAWAL_WEIGHT_USERS;
+                if (document.querySelector('#users .uzr, .uzr.inroom')) score += JAWAL_WEIGHT_USER_ITEM;
+                if (document.querySelector('.u-pic')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
+                if (document.querySelector('.u-topic')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
+                if (document.querySelector('.uhash')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
+                if (document.querySelector('img.ustat[src*="s4.png"]')) score += JAWAL_WEIGHT_MINOR_INDICATOR;
+                return score >= JAWAL_DETECTION_THRESHOLD;
             } catch (e) {
+                recordDiagnostic('detect-error', 'jawal');
                 return false;
             }
         }
@@ -118,11 +155,18 @@ javascript: (function() {
         for (let i = 0; i < attempts.length; i++) {
             try {
                 const matched = attempts[i]();
-                if (matched) return true; // توقف عند أول محاولة أحدثت تغييراً فعلياً
+                if (matched) {
+                    recordDiagnostic('fallback-success', stageName + ':' + (i + 1));
+                    return true;
+                }
             } catch (e) {
-                console.warn(`⚠️ فشلت محاولة (${i + 1}) في مرحلة "${stageName}":`, e);
+                var errorName = e && e.name ? e.name : 'Error';
+                var errorMessage = e && e.message ? String(e.message).slice(0, 120) : 'unknown';
+                recordDiagnostic('fallback-error', stageName + ':' + (i + 1) + ':' + errorName + ':' + errorMessage);
+                console.warn('ScriptPro fallback failed:', stageName, errorMessage);
             }
         }
+        recordDiagnostic('fallback-empty', stageName);
         return false;
     }
 
@@ -172,24 +216,75 @@ javascript: (function() {
     }
 
     const alertedUsers = new Set();
+    const maxVisibleAlerts = 5;
 
     function showAlert(user) {
         const toast = document.createElement("div");
         toast.onclick = () => toast.remove();
         toast.style = "background:#f0f0f0;border:2px solid #333;border-radius:10px;padding:10px;margin-top:10px;max-width:280px;font-family:sans-serif;color:#000;box-shadow:0 2px 6px rgba(0,0,0,.2);cursor:pointer;text-align:left";
-        toast.innerHTML = `
-          <div style="font-weight:bold;text-align:center;margin-bottom:8px">🔔 تنبيه</div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <img src="${user.pic}" style="width:32px;height:32px;border-radius:50%;border:1px solid #ccc">
-            ${user.icon ? `<img src="${user.icon}" style="width:16px;height:16px">` : ""}
-            <div style="flex-grow:1">
-              <div style="font-weight:bold">${user.name}</div>
-              <div style="font-size:12px;color:gray">${user.hash}</div>
-            </div>
-          </div>
-          <div style="margin-top:10px;padding:8px;background:#e0e0e0;border-radius:6px;text-align:center;font-weight:bold">دخل مخفي للروم</div>
-        `;
-        document.getElementById("sp-jw-alert-stack").appendChild(toast);
+        const title = document.createElement("div");
+        title.textContent = "🔔 تنبيه";
+        title.style = "font-weight:bold;text-align:center;margin-bottom:8px";
+        const row = document.createElement("div");
+        row.style = "display:flex;align-items:center;gap:8px";
+        const pic = document.createElement("img");
+        pic.src = safeImageUrl(user.pic, "pic/unknown.png");
+        pic.alt = "";
+        pic.style = "width:32px;height:32px;border-radius:50%;border:1px solid #ccc";
+        row.appendChild(pic);
+        const iconUrl = safeImageUrl(user.icon, "");
+        if (iconUrl) {
+            const icon = document.createElement("img");
+            icon.src = iconUrl;
+            icon.alt = "";
+            icon.style = "width:16px;height:16px";
+            row.appendChild(icon);
+        }
+        const info = document.createElement("div");
+        info.style.flexGrow = "1";
+        const name = document.createElement("div");
+        name.textContent = user.name || "بدون اسم";
+        name.style.fontWeight = "bold";
+        const hash = document.createElement("div");
+        hash.textContent = user.hash || "";
+        hash.style = "font-size:12px;color:gray";
+        info.appendChild(name);
+        info.appendChild(hash);
+        row.appendChild(info);
+        const message = document.createElement("div");
+        message.textContent = "دخل مخفي للروم";
+        message.style = "margin-top:10px;padding:8px;background:#e0e0e0;border-radius:6px;text-align:center;font-weight:bold";
+        toast.appendChild(title);
+        toast.appendChild(row);
+        toast.appendChild(message);
+        const container = document.getElementById("sp-jw-alert-stack");
+        if (!container) return;
+        while (container.children.length >= maxVisibleAlerts) {
+            container.removeChild(container.firstChild);
+        }
+        container.appendChild(toast);
+        recordDiagnostic('hidden-user-alert', 'shown');
+    }
+
+    function safeImageUrl(value, fallback) {
+        if (typeof value !== 'string' || value.length > 2048) return fallback;
+        var url = value.trim();
+        if (url.indexOf('//') === 0 ||
+            (/^[a-z][a-z0-9+.-]*:/i.test(url) && !/^https?:\/\//i.test(url))) {
+            return fallback;
+        }
+        if (/^(https?:\/\/|\/|[a-z0-9_.-]+\/)/i.test(url)) {
+            if (/^https?:\/\//i.test(url) && typeof URL === 'function') {
+                try {
+                    var parsed = new URL(url);
+                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return fallback;
+                } catch (e) {
+                    return fallback;
+                }
+            }
+            return url;
+        }
+        return fallback;
     }
 
     // ============================================================
@@ -825,8 +920,11 @@ javascript: (function() {
     // ============================================================
     // 11) مراقبة DOM — تُفعِّل كل ما سبق تلقائياً عند أي تغيير بالصفحة
     // ============================================================
-    var jawalObserver = null;
-
+    // يمنح التحديثات المتتابعة مهلة قصيرة للتجمع قبل إعادة فحص الواجهة.
+    // 50ms يجمع التغييرات المتتابعة، و250ms حد أقصى حتى لا يتأخر
+    // تحديث الواجهة أثناء تدفق DOM مستمر.
+    const JAWAL_FLUSH_DELAY_MS = 50;
+    const JAWAL_MAX_FLUSH_DELAY_MS = 250;
     function runAllStages() {
         showUsers();
         showAllHigherRanksOnlyHidden();
@@ -837,7 +935,63 @@ javascript: (function() {
         enableMemberModalControls();
     }
 
+    function scheduleRunAllStages() {
+        // Debounce changes for 50ms, but force a flush after 250ms of churn.
+        var now = Date.now();
+        if (jawalFlushTimer !== null && jawalFlushStartedAt &&
+            now - jawalFlushStartedAt >= JAWAL_MAX_FLUSH_DELAY_MS) {
+            clearTimeout(jawalFlushTimer);
+            jawalFlushTimer = null;
+            jawalFlushStartedAt = 0;
+            runAllStages();
+            return;
+        }
+        if (jawalFlushTimer !== null) clearTimeout(jawalFlushTimer);
+        if (jawalFlushTimer === null) jawalFlushStartedAt = now;
+        jawalFlushTimer = setTimeout(function() {
+            jawalFlushTimer = null;
+            jawalFlushStartedAt = 0;
+            runAllStages();
+        }, JAWAL_FLUSH_DELAY_MS);
+    }
+
+    function enableDiagnostics() {
+        diagnostics.enabled = true;
+        recordDiagnostic('diagnostics-enabled', 'dom-and-local-state-metadata-only');
+        return true;
+    }
+
+    function disableDiagnostics() {
+        diagnostics.enabled = false;
+        return true;
+    }
+
+    function getDiagnostics() {
+        return diagnostics.events.slice();
+    }
+
+    function destroy() {
+        if (jawalObserver) {
+            jawalObserver.disconnect();
+            jawalObserver = null;
+        }
+        if (jawalFlushTimer !== null) {
+            clearTimeout(jawalFlushTimer);
+            jawalFlushTimer = null;
+        }
+        jawalFlushStartedAt = 0;
+        alertedUsers.clear();
+        diagnostics.events = [];
+        disableDiagnostics();
+        if (window.ScriptPro && window.ScriptPro.activeHost === 'jawal') {
+            window.ScriptPro.activeHost = null;
+        }
+        jawalInitialized = false;
+    }
+
     function init() {
+        if (jawalInitialized) return;
+        jawalInitialized = true;
         // إنشاء نافذة البروفايل الحديثة مرة واحدة فقط عند تفعيل هذه الوحدة تحديداً
         try {
             setupProfileModalSystem();
@@ -846,11 +1000,17 @@ javascript: (function() {
         }
 
         if (typeof MutationObserver === 'function' && !jawalObserver) {
-            jawalObserver = new MutationObserver(function() {
+            jawalObserver = new MutationObserver(function(records) {
                 const searchBox = document.getElementById('usearch');
                 if (searchBox && searchBox.value.trim().length > 0) return;
-                runAllStages();
+                if (diagnostics.enabled) {
+                    var firstTarget = records && records[0] && records[0].target;
+                    var targetName = firstTarget && firstTarget.nodeName ? firstTarget.nodeName : 'body';
+                    recordDiagnostic('dom-change', String(records ? records.length : 0) + ':' + targetName);
+                }
+                scheduleRunAllStages();
             });
+            // تُراقب body لأن نافذة البروفايل والتنبيهات قد تكون خارج #users.
             jawalObserver.observe(document.body, {
                 childList: true,
                 subtree: true
@@ -867,9 +1027,39 @@ javascript: (function() {
         // للسكربت أو عند كل تشغيل لـ MutationObserver). تبقى متاحة للاستدعاء اليدوي
         // عند الحاجة عبر console: extractIdAndInterceptSocket()
         window.extractIdAndInterceptSocket = extractIdAndInterceptSocket;
+        function isDiagnosticsAllowed() {
+            return window.__SCRIPTPRO_ENABLE_DIAGNOSTICS__ === true;
+        }
+
+        window.ScriptProJawalDiagnostics = {
+            enable: function() {
+                return isDiagnosticsAllowed() ?
+                    enableDiagnostics() : false;
+            },
+            disable: function() {
+                return isDiagnosticsAllowed() ?
+                    disableDiagnostics() : false;
+            },
+            getEvents: function() {
+                return isDiagnosticsAllowed() ?
+                    getDiagnostics() : [];
+            },
+            destroy: function() {
+                return isDiagnosticsAllowed() ?
+                    destroy() : false;
+            }
+        };
     }
 
-    return { name: 'شات جوال هوست (Jawal Host)', detect: detect, init: init };
+    return {
+        name: 'شات جوال هوست (Jawal Host)',
+        detect: detect,
+        init: init,
+        destroy: destroy,
+        enableDiagnostics: enableDiagnostics,
+        disableDiagnostics: disableDiagnostics,
+        getDiagnostics: getDiagnostics
+    };
     })();
 
     // ============================================================
